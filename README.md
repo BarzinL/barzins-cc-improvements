@@ -13,6 +13,13 @@ gap.
 
 ## Contents
 
+### [`ground-skill-verifier/`](ground-skill-verifier/)
+
+The `/ground` skill and verifier subagent - grounds the agent in your codebase's actual
+wiring so it stops making assumptions about how things work without checking. Consistently
+produces near-bug-free code with Opus 4.8 by turning assertions and inferences about the
+code into verified knowledge before acting. Configurable autonomy ceilings.
+
 ### [`theory-formation-discipline/`](theory-formation-discipline/)
 
 Two paired pieces for reasoning like a good researcher without fooling yourself:
@@ -28,13 +35,18 @@ Two paired pieces for reasoning like a good researcher without fooling yourself:
   fully tested. Targets the single highest-frequency honesty failure documented in
   frontier-model system cards.
 
-## Companion repo
+## How the pieces relate
 
-- **[Claude Code `/ground` skill + verifier
-  subagent](https://github.com/BarzinL/Claude-Code-ground-skill-verifier-subagent)** -
-  grounds the agent in your codebase's actual wiring so it stops making assumptions about
-  how things work without checking. The tools here extend the same idea from "verify your
-  claims about the code" to "verify your claims about your own work."
+Same disease, different organs - a capable model stating an inference as a fact without
+checking:
+
+- **`ground-skill-verifier`** grounds the agent *inward* - its claims about how the code
+  is wired, verified against the actual code before it acts.
+- **`theory-formation-discipline`** grounds the agent *outward* - its claims about its own
+  work ("done / verified / healthy"), and its reasoning when forming an understanding.
+
+One stops the agent from guessing about the codebase; the other stops it from guessing
+about its own results.
 
 ## Philosophy
 

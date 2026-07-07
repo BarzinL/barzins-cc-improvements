@@ -56,6 +56,12 @@ def _asst_tool(cmd: str) -> dict:
     }
 
 
+def _tool_result(text: str = "ok") -> dict:
+    # Claude Code returns tool results as type:"user" events - these must NOT reset
+    # the exchange window (regression guard for the tool-result false positive).
+    return {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": text}]}}
+
+
 CASES = [
     # (name, events, stop_hook_active, want_block)
     (
@@ -97,6 +103,18 @@ CASES = [
     (
         "'all tests pass' + npm test action -> pass",
         [_user("check the suite"), _asst_tool("npm test"), _asst_text("All tests passing.")],
+        False,
+        False,
+    ),
+    (
+        "action -> tool_result -> summary claim in a LATER assistant msg -> pass "
+        "(regression: tool_result must not reset the window)",
+        [
+            _user("build and verify it"),
+            _asst_tool("pytest tests/"),
+            _tool_result("8 passed"),
+            _asst_text("All tests passed - the change is verified."),
+        ],
         False,
         False,
     ),

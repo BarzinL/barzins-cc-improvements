@@ -89,8 +89,31 @@ def _resolve_transcript(payload: dict) -> Path | None:
     return None
 
 
+def _is_real_user_turn(e: dict) -> bool:
+    """A user PROMPT, not a tool-result plumbing event.
+
+    In Claude Code transcripts, tool results come back as type:"user" events whose
+    content is a list of tool_result blocks. Those must NOT reset the exchange window,
+    or every assistant summary emitted after the last tool call looks action-less.
+    A real prompt is a bare string, or a content list containing a text block.
+    """
+    if e.get("type") != "user":
+        return False
+    content = e.get("message", {}).get("content")
+    if isinstance(content, str):
+        return True
+    if isinstance(content, list):
+        return any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+    return False
+
+
 def _tail_events(transcript: Path) -> list[dict]:
-    """Events since (and including) the last user message - the final exchange only."""
+    """Events since (and including) the last real user prompt - the final exchange.
+
+    Tool-result events (type:"user" with only tool_result blocks) do NOT reset the
+    window; otherwise a claim made in a summary after the last tool call would look
+    unbacked even though the verifying action ran earlier in the same turn.
+    """
     events: list[dict] = []
     for line in transcript.read_text(errors="ignore").splitlines():
         line = line.strip()
@@ -102,7 +125,7 @@ def _tail_events(transcript: Path) -> list[dict]:
             continue
     last_user = 0
     for i, e in enumerate(events):
-        if e.get("type") == "user":
+        if _is_real_user_turn(e):
             last_user = i
     return events[last_user:]
 

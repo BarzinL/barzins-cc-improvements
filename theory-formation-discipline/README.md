@@ -42,8 +42,7 @@ discipline handles everything a hook can't reach.
 ## Relationship to the `/ground` skill + verifier subagent
 
 This is a companion to the [ground skill and verifier
-subagent](https://github.com/BarzinL/Claude-Code-ground-skill-verifier-subagent). Same
-disease, two organs:
+subagent](../ground-skill-verifier/) in this same repo. Same disease, two organs:
 
 - **`/ground`** makes the agent verify its claims *about the codebase* before acting -
   grounding assumptions about how the code is wired in the actual code.
