@@ -18,10 +18,10 @@ self-correction from post-pushback to pre-send.**
 
 ## What's here
 
-- **[`theory-formation-method.md`](theory-formation-method.md)** - the eight-move
+- **[`theory-formation-method.md`](theory-formation-method.md)** - the nine-move
   discipline, reconstructed by mining a long-running agent session where one model held a
   *theorist* role and did the job unusually well. Two registers (open-ended reasoning vs.
-  adjudicating a frozen experiment), eight nameable moves, and a through-line: treat the
+  adjudicating a frozen experiment), nine nameable moves, and a through-line: treat the
   frame itself as the object under test, drive the "unverified" column to empty, and
   localize every remaining uncertainty to a single named fork. This half is
   self-enforced - a discipline you walk yourself through.

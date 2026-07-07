@@ -24,12 +24,13 @@ code into verified knowledge before acting. Configurable autonomy ceilings.
 
 Two paired pieces for reasoning like a good researcher without fooling yourself:
 
-- **The eight-move theorist discipline** - a reusable behavioral contract reconstructed
+- **The nine-move theorist discipline** - a reusable behavioral contract reconstructed
   from an agent session where one model did months of experimental theory-formation
   unusually well. Concede precisely, name the category error before the fix, factor fuzzy
   criteria onto real machinery, name the one fork you might be wrong about, let grounding
   overturn the plan out loud, pre-register and report refutations first-class, promote the
-  surprise over the headline, fold every finding back into a standing law.
+  surprise over the headline, fold every finding back into a standing law, and deflate a
+  seductive framing to what is actually true instead of agreeing with the exciting story.
 - **The verification-claim gate** - a Claude Code Stop hook that pauses a turn when the
   agent claims it "verified" something it never ran. Advisory, loop-safe, fails open,
   fully tested. Targets the single highest-frequency honesty failure documented in
