@@ -36,6 +36,25 @@ Two paired pieces for reasoning like a good researcher without fooling yourself:
   fully tested. Targets the single highest-frequency honesty failure documented in
   frontier-model system cards.
 
+### [`experiment-freeze-gate/`](experiment-freeze-gate/)
+
+A pre-compute gate for experiment-shaped work (evals, benchmarks, A/B tests, training
+runs). Targets the failure class no after-the-fact review can catch: **a defective spec,
+faithfully built** - the verdict rule names a quantity the artifact schema never records,
+or the initial condition already clears the success bar, so every downstream check passes
+and the run is still worthless. Eight mechanical checks, each compiled from a real
+incident, run after the design freezes and before compute is committed.
+
+### [`delegated-build-stint/`](delegated-build-stint/)
+
+A contract (skill + subagent definition) for delegating build work against a frozen plan.
+Headline rule: a stint **never takes custody of a long run** - a subagent that spawns a
+detached child has no live children of its own, so the harness reports it complete while
+the real run is half-done (hit three times in one session). Plus: import-check every CLI
+path before reporting done, duplicate frozen constants into a config-integrity test,
+declare every formal deviation, and hand back claims-with-evidence-pointers instead of a
+narrative summary.
+
 ## How the pieces relate
 
 Same disease, different organs - a capable model stating an inference as a fact without
@@ -45,9 +64,15 @@ checking:
   is wired, verified against the actual code before it acts.
 - **`theory-formation-discipline`** grounds the agent *outward* - its claims about its own
   work ("done / verified / healthy"), and its reasoning when forming an understanding.
+- **`experiment-freeze-gate`** grounds a design *against itself* - upstream of everything,
+  where a spec can be internally inconsistent and every downstream check still passes.
+- **`delegated-build-stint`** grounds claims that cross a *delegation seam* - the report an
+  executor agent writes is the delegator's only view of the work, so it must be evidence
+  pointers, honest custody, and declared deviations rather than a story.
 
-One stops the agent from guessing about the codebase; the other stops it from guessing
-about its own results.
+One stops the agent from guessing about the codebase; one from guessing about its own
+results; one from burning compute on a self-contradictory design; one from trusting a
+subagent's narrative over its evidence.
 
 ## Philosophy
 
