@@ -20,6 +20,20 @@ wiring so it stops making assumptions about how things work without checking. Co
 produces near-bug-free code with Opus 4.8 by turning assertions and inferences about the
 code into verified knowledge before acting. Configurable autonomy ceilings.
 
+### [`seam-proof-build/`](seam-proof-build/)
+
+The through-build companion to `/ground`. Grounding turns the agent's claims about the
+code into verified knowledge *before* it writes; this keeps the same discipline running
+*during* the build - every load-bearing step proven by a real run that could have failed,
+at the seam, the moment construction reaches it. Six moves compiled from a real build
+session: prove the keystone seam with a throwaway before formalizing, probe generality to
+find where a capability *stops* being true, negative-control every gate so a pass means
+something, verify each seam bottom-up in isolation, re-prove any seam you change, and prove
+operational/security seams too - by proxy if you can't run them (author the check, hand it
+off, gate on the result; a security boundary must be shown to fail closed). The core rule:
+no step is done on the strength of reading the code you just wrote - and for the steps you
+can't run yourself, the check you authored comes back green from someone who could.
+
 ### [`theory-formation-discipline/`](theory-formation-discipline/)
 
 Two paired pieces for reasoning like a good researcher without fooling yourself:
@@ -62,6 +76,10 @@ checking:
 
 - **`ground-skill-verifier`** grounds the agent *inward* - its claims about how the code
   is wired, verified against the actual code before it acts.
+- **`seam-proof-build`** grounds the agent *through the build* - the claims about what it
+  just wrote ("returns the right shape / gets past the wall / the gate passes"), each
+  proven by a real run at its seam as construction reaches it. `/ground`'s matched pair:
+  one owns the pass before the first line of code, the other owns every seam after it.
 - **`theory-formation-discipline`** grounds the agent *outward* - its claims about its own
   work ("done / verified / healthy"), and its reasoning when forming an understanding.
 - **`experiment-freeze-gate`** grounds a design *against itself* - upstream of everything,
@@ -70,9 +88,9 @@ checking:
   executor agent writes is the delegator's only view of the work, so it must be evidence
   pointers, honest custody, and declared deviations rather than a story.
 
-One stops the agent from guessing about the codebase; one from guessing about its own
-results; one from burning compute on a self-contradictory design; one from trusting a
-subagent's narrative over its evidence.
+One stops the agent from guessing about the codebase; one from guessing about what it just
+built, seam by seam; one from guessing about its own results; one from burning compute on a
+self-contradictory design; one from trusting a subagent's narrative over its evidence.
 
 ## Philosophy
 
