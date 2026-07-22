@@ -69,6 +69,20 @@ path before reporting done, duplicate frozen constants into a config-integrity t
 declare every formal deviation, and hand back claims-with-evidence-pointers instead of a
 narrative summary.
 
+### [`discipline-compliance-scanner/`](discipline-compliance-scanner/)
+
+The retrospective auditor. Every other tool here fires *before* the agent speaks or acts;
+none checks whether the discipline was actually followed. This mines the agent's own
+session transcripts and reports where standing bright-line rules were broken - with
+citations. Run against real work it found the forbidden em-dash written into files hundreds
+of times and `sqlite3` used on session DBs without the mandatory `-readonly` dozens of
+times: rules the agent had "known" the whole time. A keystone probe first established that
+rules split in two - **bright-line** (a forbidden token/tool, detectable deterministically,
+covered here) and **judgment** (reactive-patching, skipped grounding: the signal is in
+content and reasoning, needs an LLM-judge, deliberately deferred). Reports only; the
+operator promotes. Never an autonomous grader - that would invite the reward-hacking these
+tools exist to prevent.
+
 ## How the pieces relate
 
 Same disease, different organs - a capable model stating an inference as a fact without
@@ -87,10 +101,14 @@ checking:
 - **`delegated-build-stint`** grounds claims that cross a *delegation seam* - the report an
   executor agent writes is the delegator's only view of the work, so it must be evidence
   pointers, honest custody, and declared deviations rather than a story.
+- **`discipline-compliance-scanner`** grounds all of them *after the fact* - the others say
+  what should happen before the agent acts; this measures, from the transcripts, whether it
+  actually did, and hands back the violations the agent committed while "knowing" the rule.
 
-One stops the agent from guessing about the codebase; one from guessing about what it just
-built, seam by seam; one from guessing about its own results; one from burning compute on a
-self-contradictory design; one from trusting a subagent's narrative over its evidence.
+The first five stop the agent from guessing - about the codebase, about what it just built,
+about its own results, about a self-contradictory design, about a subagent's narrative. The
+sixth measures whether the first five (and every other standing rule) were obeyed, because
+a discipline no one audits decays into a rule the agent knows and breaks at the same time.
 
 ## Philosophy
 
