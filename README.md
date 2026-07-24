@@ -1,120 +1,72 @@
 # Barzin's Claude Code Improvements
 
-A collection of practical tools and disciplines for getting more honest, more grounded
-work out of Claude Code - built and battle-tested against real production development with
-Opus 4.8.
+Skills, hooks, and standing rules that make Claude Code verify things instead of guessing.
+Each one was written after a specific failure in real production work with Opus 4.8, and
+each says which failure.
 
-The common thread across everything here: **capable models state inferences as facts
-without checking.** They'll tell you how the code is wired without reading it, and tell
-you work is verified without running it - then, once you push back, name their own error
-with perfect precision. The capability to be honest is already there. What's missing is a
-principle that fires *before* the claim ships. Each tool here closes one slice of that
-gap.
+They all target the same behaviour: **a capable model states an inference as a fact without
+checking.** It will describe how your code is wired without reading it, and report work as
+verified without running it. Push back and it identifies its own error immediately, which
+means the capability was there the whole time. What's missing is something that fires before
+the claim ships.
 
 ## Contents
 
-### [`ground-skill-verifier/`](ground-skill-verifier/)
+| Directory | What it does | Form |
+|---|---|---|
+| [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent |
+| [`seam-proof-build/`](seam-proof-build/) | Keeps that discipline running *during* the build: every load-bearing step proven by a real run that could have failed. | skill |
+| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that blocks "verified" claims with no verification behind them. | prose + hook |
+| [`experiment-freeze-gate/`](experiment-freeze-gate/) | Eight checks between freezing an experiment design and spending compute on it. Catches specs that are internally broken but pass every downstream check. | skill |
+| [`delegated-build-stint/`](delegated-build-stint/) | Contract for handing build work to a subagent. Headline rule: a stint never takes custody of a long run. | skill + agent |
+| [`discipline-compliance-scanner/`](discipline-compliance-scanner/) | Mines your session transcripts and reports where standing rules were actually broken, with citations. | script |
+| [`stopping-rules/`](stopping-rules/) | Four `CLAUDE.md` rules for the moments the model stops too early: stale world facts, patching without a diagnosis, shallow answers, made-up estimates. | prose |
 
-The `/ground` skill and verifier subagent - grounds the agent in your codebase's actual
-wiring so it stops making assumptions about how things work without checking. Consistently
-produces near-bug-free code with Opus 4.8 by turning assertions and inferences about the
-code into verified knowledge before acting. Configurable autonomy ceilings.
+## Install
 
-### [`seam-proof-build/`](seam-proof-build/)
+Skills go in `.claude/skills/<name>/SKILL.md`, project-local or global (`~/.claude/skills/`).
+Agent definitions go in `.claude/agents/`. Each directory's README has the exact paths and an
+example invocation. Two that differ:
 
-The through-build companion to `/ground`. Grounding turns the agent's claims about the
-code into verified knowledge *before* it writes; this keeps the same discipline running
-*during* the build - every load-bearing step proven by a real run that could have failed,
-at the seam, the moment construction reaches it. Six moves compiled from a real build
-session: prove the keystone seam with a throwaway before formalizing, probe generality to
-find where a capability *stops* being true, negative-control every gate so a pass means
-something, verify each seam bottom-up in isolation, re-prove any seam you change, and prove
-operational/security seams too - by proxy if you can't run them (author the check, hand it
-off, gate on the result; a security boundary must be shown to fail closed). The core rule:
-no step is done on the strength of reading the code you just wrote - and for the steps you
-can't run yourself, the check you authored comes back green from someone who could.
+```bash
+# discipline-compliance-scanner - just run it
+python3 discipline-compliance-scanner/scan.py --all
 
-### [`theory-formation-discipline/`](theory-formation-discipline/)
+# verification-claim-gate - a Stop hook, needs registering in .claude/settings.json
+# see theory-formation-discipline/verification-claim-gate/README.md
+```
 
-Two paired pieces for reasoning like a good researcher without fooling yourself:
+The prose pieces (`stopping-rules/`, the nine-move discipline) are meant to be copied into
+your own `CLAUDE.md`.
 
-- **The nine-move theorist discipline** - a reusable behavioral contract reconstructed
-  from an agent session where one model did months of experimental theory-formation
-  unusually well. Concede precisely, name the category error before the fix, factor fuzzy
-  criteria onto real machinery, name the one fork you might be wrong about, let grounding
-  overturn the plan out loud, pre-register and report refutations first-class, promote the
-  surprise over the headline, fold every finding back into a standing law, and deflate a
-  seductive framing to what is actually true instead of agreeing with the exciting story.
-- **The verification-claim gate** - a Claude Code Stop hook that pauses a turn when the
-  agent claims it "verified" something it never ran. Advisory, loop-safe, fails open,
-  fully tested. Targets the single highest-frequency honesty failure documented in
-  frontier-model system cards.
+## Where each one fires
 
-### [`experiment-freeze-gate/`](experiment-freeze-gate/)
+- Before writing code: `ground-skill-verifier`
+- While building: `seam-proof-build`
+- Before spending compute: `experiment-freeze-gate`
+- Across a delegation boundary: `delegated-build-stint`
+- When reporting results: `theory-formation-discipline`
+- After the fact, from transcripts: `discipline-compliance-scanner`
+- At the moment of stopping: `stopping-rules`
 
-A pre-compute gate for experiment-shaped work (evals, benchmarks, A/B tests, training
-runs). Targets the failure class no after-the-fact review can catch: **a defective spec,
-faithfully built** - the verdict rule names a quantity the artifact schema never records,
-or the initial condition already clears the success bar, so every downstream check passes
-and the run is still worthless. Eight mechanical checks, each compiled from a real
-incident, run after the design freezes and before compute is committed.
+The first six check a **claim**, so parts of them can be enforced mechanically: the
+verification-claim gate is a hook, the scanner is a program. `stopping-rules` checks a
+**stop**, which means checking against work that was never done. One attempt to detect such
+a rule from transcripts (reactive patching, from the shape `edit → failed command → re-edit`)
+failed, because that pattern is indistinguishable from normal iteration. That line is where
+hooks stop working and discipline is all you have.
 
-### [`delegated-build-stint/`](delegated-build-stint/)
+## Caveats
 
-A contract (skill + subagent definition) for delegating build work against a frozen plan.
-Headline rule: a stint **never takes custody of a long run** - a subagent that spawns a
-detached child has no live children of its own, so the harness reports it complete while
-the real run is half-done (hit three times in one session). Plus: import-check every CLI
-path before reporting done, duplicate frozen constants into a config-integrity test,
-declare every formal deviation, and hand back claims-with-evidence-pointers instead of a
-narrative summary.
+None of this makes the model smarter. It makes it more honest about what it actually knows,
+by moving self-correction from after-you-push-back to before-it-speaks.
 
-### [`discipline-compliance-scanner/`](discipline-compliance-scanner/)
+Most of these are self-enforced, meaning the agent walks itself through them and can skip
+them. Only the hook and the scanner are mechanical. Each README labels which kind it is,
+because calling a self-enforced discipline a guarantee would be the exact failure these
+exist to prevent. That is also why `discipline-compliance-scanner` exists: run against real
+work, it found bright-line rules broken hundreds of times by an agent that had "known" them
+throughout.
 
-The retrospective auditor. Every other tool here fires *before* the agent speaks or acts;
-none checks whether the discipline was actually followed. This mines the agent's own
-session transcripts and reports where standing bright-line rules were broken - with
-citations. Run against real work it found the forbidden em-dash written into files hundreds
-of times and `sqlite3` used on session DBs without the mandatory `-readonly` dozens of
-times: rules the agent had "known" the whole time. A keystone probe first established that
-rules split in two - **bright-line** (a forbidden token/tool, detectable deterministically,
-covered here) and **judgment** (reactive-patching, skipped grounding: the signal is in
-content and reasoning, needs an LLM-judge, deliberately deferred). Reports only; the
-operator promotes. Never an autonomous grader - that would invite the reward-hacking these
-tools exist to prevent.
-
-## How the pieces relate
-
-Same disease, different organs - a capable model stating an inference as a fact without
-checking:
-
-- **`ground-skill-verifier`** grounds the agent *inward* - its claims about how the code
-  is wired, verified against the actual code before it acts.
-- **`seam-proof-build`** grounds the agent *through the build* - the claims about what it
-  just wrote ("returns the right shape / gets past the wall / the gate passes"), each
-  proven by a real run at its seam as construction reaches it. `/ground`'s matched pair:
-  one owns the pass before the first line of code, the other owns every seam after it.
-- **`theory-formation-discipline`** grounds the agent *outward* - its claims about its own
-  work ("done / verified / healthy"), and its reasoning when forming an understanding.
-- **`experiment-freeze-gate`** grounds a design *against itself* - upstream of everything,
-  where a spec can be internally inconsistent and every downstream check still passes.
-- **`delegated-build-stint`** grounds claims that cross a *delegation seam* - the report an
-  executor agent writes is the delegator's only view of the work, so it must be evidence
-  pointers, honest custody, and declared deviations rather than a story.
-- **`discipline-compliance-scanner`** grounds all of them *after the fact* - the others say
-  what should happen before the agent acts; this measures, from the transcripts, whether it
-  actually did, and hands back the violations the agent committed while "knowing" the rule.
-
-The first five stop the agent from guessing - about the codebase, about what it just built,
-about its own results, about a self-contradictory design, about a subagent's narrative. The
-sixth measures whether the first five (and every other standing rule) were obeyed, because
-a discipline no one audits decays into a rule the agent knows and breaks at the same time.
-
-## Philosophy
-
-Nothing here tries to make the model *smarter*. Each piece makes it *more honest about
-what it actually knows* - by moving self-correction from after-you-push-back to
-before-it-speaks. Some of that is enforceable by the harness (hooks); most of it is a
-discipline the agent walks itself through. Both are here, and each is labeled for which it
-is - because pretending a self-enforced discipline is a hard guarantee would be exactly
-the failure these tools exist to catch.
+MIT licensed. Built against Opus 4.8; the disciplines are model-agnostic, the transcript
+paths in the scanner are Claude Code specific.
