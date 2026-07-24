@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+.ruff_cache/
 
 # Local Claude Code session data (usage/cost logs) - never publish
 .claude/
