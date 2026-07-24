@@ -1,6 +1,6 @@
 # Claude Code: `/experiment-freeze-gate` skill
 
-A pre-compute checklist for experiment-shaped work — evals, benchmarks, A/B
+A pre-compute checklist for experiment-shaped work - evals, benchmarks, A/B
 tests, training runs, anything scored against pre-registered criteria.
 
 ## The failure class
@@ -10,12 +10,12 @@ no claims-vs-repo audit can catch: a defective spec, faithfully built.** The
 verdict rule names a quantity the artifact schema forgot; the initial condition
 already clears the success bar; the pre-registered contrast is against a state
 that a successful run erases. In every one of these, the executor's claims are
-all true and the tests are all green — the defect lives in the spec's relation
+all true and the tests are all green - the defect lives in the spec's relation
 to itself.
 
 Both real near-misses that motivated this skill came from exactly there. In one,
 the pre-registered verdict compared an experimental arm against a baseline whose
-value the results schema never recorded — and the eval code, built faithfully to
+value the results schema never recorded - and the eval code, built faithfully to
 the schema, computed the number and threw it away. In the other, a pre-launch
 smoke showed the *random, unevolved* initial population already scoring 2.5×
 above the verdict bar: the run would have "confirmed emergence" at generation
@@ -24,7 +24,7 @@ purely mechanical once you know to run them.
 
 ## What's in the box
 
-`SKILL.md` — the freeze protocol plus an eight-check gate (G1–G8), each check
+`SKILL.md` - the freeze protocol plus an eight-check gate (G1–G8), each check
 compiled from a real incident:
 
 | Check | One line |
@@ -51,7 +51,7 @@ compiled from a real incident:
 
 ## Honest status
 
-The individual rules are battle-tested — each exists because a real incident
+The individual rules are battle-tested - each exists because a real incident
 demonstrated its shape, and the two headline incidents were caught *by* these
 checks running as a pre-launch pass. The packaging as a standalone skill is
 newer than the rules; no throughput/efficiency claims are made for it.
@@ -60,6 +60,6 @@ newer than the rules; no throughput/efficiency claims are made for it.
 
 `ground-skill-verifier` checks claims about *code* against the code.
 `theory-formation-discipline` checks claims about *your own work and reasoning*.
-This skill checks an experiment's spec against *itself*, before compute — the
+This skill checks an experiment's spec against *itself*, before compute - the
 one place where "everything downstream verified clean" can still mean the run
 was worthless.
