@@ -172,7 +172,12 @@ def test_malformed_lines_are_skipped(tmp_path: Path) -> None:
 # ------------------------------------------------- end to end, against real payloads
 
 
-def run(transcript: Path, session_id: str, raw: str | None = None) -> str:
+def run(
+    transcript: Path,
+    session_id: str,
+    raw: str | None = None,
+    event: str = "UserPromptSubmit",
+) -> str:
     payload = (
         raw
         if raw is not None
@@ -180,7 +185,7 @@ def run(transcript: Path, session_id: str, raw: str | None = None) -> str:
             {
                 "session_id": session_id,
                 "transcript_path": str(transcript),
-                "hook_event_name": "UserPromptSubmit",
+                "hook_event_name": event,
                 "user_prompt": "x",
             }
         )
@@ -340,3 +345,107 @@ def test_project_scope_uses_the_project_dir_variable(tmp_path: Path) -> None:
     assert _install.resolve_command(cmd, "project", tmp_path)[1] == str(
         tmp_path / ".claude" / "hooks" / "model_discipline.py"
     )
+
+
+# ---------------------------------------------- PostCompact: the compaction refresh
+# An on-change payload injects once, is summarized away by the first compaction, and
+# never re-fires because the family has not changed - a Sonnet stint silently loses
+# its discipline partway through. PostCompact marks; the next prompt re-injects.
+
+
+def test_post_compact_leg_is_silent(tmp_path: Path) -> None:
+    """It cannot inject (no decision control), so it must never print."""
+    t = _transcript(tmp_path, ["claude-sonnet-5"])
+    assert run(t, "pc-silent", event="PostCompact") == ""
+    assert run(t, "pc-silent-opus", event="PostCompact") == ""
+
+
+def test_on_change_payload_refires_after_compaction(tmp_path: Path) -> None:
+    """The headline behaviour this leg exists for."""
+    t = _transcript(tmp_path, ["claude-sonnet-5"])
+    assert "Sonnet" in run(t, "pc-refire")
+    assert run(t, "pc-refire") == "", "still change-gated between compactions"
+    assert run(t, "pc-refire", event="PostCompact") == ""
+    assert "Sonnet" in run(t, "pc-refire"), "must re-inject after a compaction"
+
+
+def test_compaction_marker_is_single_shot(tmp_path: Path) -> None:
+    t = _transcript(tmp_path, ["claude-sonnet-5"])
+    run(t, "pc-once")
+    run(t, "pc-once", event="PostCompact")
+    assert "Sonnet" in run(t, "pc-once")
+    assert run(t, "pc-once") == "", "the marker must be consumed, not latch on"
+
+
+def test_compaction_marker_is_per_session(tmp_path: Path) -> None:
+    """A compaction in one session must not force an injection in another."""
+    t = _transcript(tmp_path, ["claude-sonnet-5"])
+    run(t, "pc-a")
+    run(t, "pc-b")
+    run(t, "pc-a", event="PostCompact")
+    assert run(t, "pc-b") == "", "marker leaked across sessions"
+    assert "Sonnet" in run(t, "pc-a")
+
+
+def test_marker_consumed_even_when_family_unrecognized(tmp_path: Path) -> None:
+    """Consumed before payload resolution, so it cannot fire at an unrelated later
+    turn. Compaction happens, then a turn we say nothing about, then a real turn."""
+    # Separate dirs: _transcript always writes "t.jsonl", so two calls on one
+    # tmp_path would hand back the same file.
+    (d1 := tmp_path / "a").mkdir()
+    (d2 := tmp_path / "b").mkdir()
+    unknown = _transcript(d1, ["gpt-4"])
+    sonnet = _transcript(d2, ["claude-sonnet-5"])
+    assert "Sonnet" in run(sonnet, "pc-stale")
+    assert run(sonnet, "pc-stale") == ""
+    run(sonnet, "pc-stale", event="PostCompact")
+    assert run(unknown, "pc-stale") == "", "unknown family still says nothing"
+    assert run(sonnet, "pc-stale") == "", "the marker should have been consumed already"
+
+
+def test_every_turn_payload_unaffected_by_the_marker(tmp_path: Path) -> None:
+    t = _transcript(tmp_path, ["claude-opus-5"])
+    assert run(t, "pc-opus")
+    run(t, "pc-opus", event="PostCompact")
+    assert run(t, "pc-opus"), "every-turn keeps firing regardless"
+
+
+def test_post_compact_needs_no_transcript(tmp_path: Path) -> None:
+    """The marking leg only needs session_id; it must not depend on a readable
+    transcript, which may be mid-rewrite at compaction time."""
+    payload = json.dumps({"session_id": "pc-notp", "hook_event_name": "PostCompact"})
+    assert run(tmp_path / "nope.jsonl", "pc-notp", raw=payload) == ""
+    t = _transcript(tmp_path, ["claude-sonnet-5"])
+    assert "Sonnet" in run(t, "pc-notp"), "marker written without a transcript path"
+
+
+def test_marker_path_is_distinct_from_state_path() -> None:
+    assert _md.compact_marker_path("s") != _md.state_path("s")
+
+
+# -------------------------------------------------- installer registers both events
+
+
+def test_installer_registers_both_events() -> None:
+    out = _install.merged({}, "CMD")
+    for event in _install.EVENTS:
+        assert _install._event_installed(out, event, "CMD"), event
+    assert set(_install.EVENTS) == {"UserPromptSubmit", "PostCompact"}
+
+
+def test_installer_upgrades_a_pre_postcompact_install() -> None:
+    """already_installed must be False when only the old leg is present, or an
+    existing user never gets the new event."""
+    old = {"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": "CMD"}]}]}}
+    assert not _install.already_installed(old, "CMD")
+    out = _install.merged(old, "CMD")
+    assert _install.already_installed(out, "CMD")
+    # and it did not duplicate the leg that was already there
+    entries = [h for g in out["hooks"]["UserPromptSubmit"] for h in g["hooks"]]
+    assert sum(1 for e in entries if e.get("command") == "CMD") == 1
+
+
+def test_installer_merge_is_idempotent() -> None:
+    once = _install.merged({}, "CMD")
+    twice = _install.merged(once, "CMD")
+    assert once == twice

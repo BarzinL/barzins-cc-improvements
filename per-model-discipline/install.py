@@ -83,8 +83,15 @@ def read_settings(path: Path) -> dict:
     return data
 
 
-def already_installed(settings: dict, cmd: str) -> bool:
-    groups = (settings.get("hooks") or {}).get("UserPromptSubmit") or []
+# Both legs run the same command; the script branches on `hook_event_name`.
+# UserPromptSubmit injects; PostCompact only marks that a compaction happened, so an
+# on-change payload is re-injected on the next prompt instead of being lost to the
+# summary. See the module docstring in model_discipline.py.
+EVENTS = ("UserPromptSubmit", "PostCompact")
+
+
+def _event_installed(settings: dict, event: str, cmd: str) -> bool:
+    groups = (settings.get("hooks") or {}).get(event) or []
     for group in groups:
         for hook in (group or {}).get("hooks") or []:
             if (hook or {}).get("command") == cmd:
@@ -92,23 +99,37 @@ def already_installed(settings: dict, cmd: str) -> bool:
     return False
 
 
+def already_installed(settings: dict, cmd: str) -> bool:
+    """True only when EVERY leg is present, so a pre-PostCompact install still
+    upgrades rather than reporting itself as done."""
+    return all(_event_installed(settings, e, cmd) for e in EVENTS)
+
+
 def merged(settings: dict, cmd: str) -> dict:
-    """A copy of settings with our hook appended to hooks.UserPromptSubmit."""
+    """A copy of settings with our hook appended to each event in EVENTS.
+
+    Idempotent per event: an install that already has UserPromptSubmit but not
+    PostCompact adds only the missing leg.
+    """
     out = json.loads(json.dumps(settings))  # deep copy without importing copy
     hooks = out.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise Fail("settings.json has a 'hooks' key that is not an object")
-    groups = hooks.setdefault("UserPromptSubmit", [])
-    if not isinstance(groups, list):
-        raise Fail("settings.json has a 'hooks.UserPromptSubmit' key that is not an array")
-    entry = {"type": "command", "command": cmd, "statusMessage": STATUS}
-    # UserPromptSubmit groups carry no matcher; join a matcher-less group if one
-    # exists rather than adding a second group beside it.
-    for group in groups:
-        if isinstance(group, dict) and "matcher" not in group and isinstance(group.get("hooks"), list):
-            group["hooks"].append(entry)
-            return out
-    groups.append({"hooks": [entry]})
+    for event in EVENTS:
+        if _event_installed(out, event, cmd):
+            continue
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
+            raise Fail(f"settings.json has a 'hooks.{event}' key that is not an array")
+        entry = {"type": "command", "command": cmd, "statusMessage": STATUS}
+        # Neither event's groups carry a matcher; join a matcher-less group if one
+        # exists rather than adding a second group beside it.
+        for group in groups:
+            if isinstance(group, dict) and "matcher" not in group and isinstance(group.get("hooks"), list):
+                group["hooks"].append(entry)
+                break
+        else:
+            groups.append({"hooks": [entry]})
     return out
 
 
@@ -136,12 +157,18 @@ def _transcript(dir_: Path, model: str) -> Path:
     return p
 
 
-def _run(argv: list[str], transcript: Path, session: str, state: Path) -> str:
+def _run(
+    argv: list[str],
+    transcript: Path,
+    session: str,
+    state: Path,
+    event: str = "UserPromptSubmit",
+) -> str:
     payload = json.dumps(
         {
             "session_id": session,
             "transcript_path": str(transcript),
-            "hook_event_name": "UserPromptSubmit",
+            "hook_event_name": event,
             "user_prompt": "x",
         }
     )
@@ -198,8 +225,22 @@ def verify(argv: list[str]) -> None:
         if _run(argv, sonnet, "verify-sonnet", state):
             raise Fail("the sonnet payload repeated on an unchanged family; cadence is broken")
 
+        # The PostCompact leg. Marking must be silent, and must make the very next
+        # prompt re-inject the on-change payload it would otherwise have skipped.
+        if _run(argv, sonnet, "verify-sonnet", state, event="PostCompact"):
+            raise Fail("the PostCompact leg printed something; it must only mark state")
+        if not _run(argv, sonnet, "verify-sonnet", state):
+            raise Fail(
+                "an on-change payload did not re-fire after PostCompact. Without this, a "
+                "stint's discipline is summarized away at the first compaction and never "
+                "returns. Check that hooks.PostCompact is registered in settings.json."
+            )
+        if _run(argv, sonnet, "verify-sonnet", state):
+            raise Fail("the compaction marker fired twice; it must be single-shot")
+
     print("acceptance check passed: fires every turn for opus, on change for sonnet, "
-          "silent for unknown / synthetic / missing transcript.")
+          "re-fires once after PostCompact, silent for unknown / synthetic / missing "
+          "transcript.")
 
 
 # --------------------------------------------------------------------------- main

@@ -61,6 +61,34 @@ read `opus` across a compaction, with the payload long gone from context. So:
 Dropping in `newfamily.md` is the whole of adding a family; the matcher picks up the
 filename. Keep payloads short - they are ambient cost on every turn they fire.
 
+## Compaction refresh
+
+`on-change` on its own is not trustworthy, and it fails silently. Switch to Sonnet, the
+payload injects once, the first compaction summarizes it away - and because the family has
+not changed since, nothing ever re-fires. The rest of that stint runs with no discipline
+and nothing to show it happened.
+
+So the same script also registers on `PostCompact`, where it writes a per-session marker
+and prints nothing. The next `UserPromptSubmit` consumes the marker and treats it as a
+reason to inject even though the family is unchanged. `install.py` registers both events;
+an install predating this adds only the missing leg.
+
+**Why a marker rather than injecting at compaction time.** `PostCompact` cannot inject -
+the hook reference lists it under *"No decision control. Used for side effects like
+logging or cleanup."* `SessionStart` with matcher `compact` fires on the same event and
+*can* inject, but taking that route would put the same payload behind a second surface,
+in a different output format (`hookSpecificOutput.additionalContext` rather than stdout),
+with a second copy of the resolution logic. One injection path is worth the indirection.
+The cost: a compaction landing mid-turn is not refreshed until the next prompt, so that
+turn's remainder is unguarded.
+
+**This does not retire `every-turn`.** A once-per-compaction injection is recent right
+after a compaction and thirty turns stale by the next one - the same decay, more slowly.
+For a format rule that is a real loss, and `every-turn` is cheap: `opus.md` is 779 bytes,
+about 190 tokens, roughly 2% of a 500k session, and what it buys is the rule sitting next
+to the prompt it governs. Keep format rules on `every-turn`. The marker is what makes
+`on-change` safe to rely on.
+
 ## Two things that look right and are not
 
 **There is no `model` field in the `UserPromptSubmit` payload.** Only `SessionStart`
@@ -81,9 +109,10 @@ to `opus`, and isolating one version means parsing a version out of an open set.
 
 ## Subagents
 
-Payloads reach the main conversation only. This fires on `UserPromptSubmit`, which is a
-real user prompt; a subagent's prompt arrives as an Agent/Task tool call instead, and its
-transcript is a separate file under `<session>/subagents/`. In a sampled subagent
+Payloads reach the main conversation only. Injection happens on `UserPromptSubmit`, which
+is a real user prompt (the `PostCompact` leg writes state and never prints); a subagent's
+prompt arrives as an Agent/Task tool call instead, and its transcript is a separate file
+under `<session>/subagents/`. In a sampled subagent
 transcript the first message was the parent's prompt verbatim, with no injected content
 and no system-reminder.
 

@@ -20,6 +20,29 @@ re-fires (measured: a state file still read `opus` across a compaction). So
 A rule needed on every substantive turn, such as an output-format rule, must be
 `every-turn`, or it decays out of context while still looking installed.
 
+**Compaction refresh (the PostCompact leg).** The decay above is a real bug, not just
+a cost question: a Sonnet stint injects once, gets compacted, and runs the rest of the
+session with no discipline and nothing to show it. So this script also registers on
+`PostCompact`, where it writes a per-session marker and prints nothing; the next
+`UserPromptSubmit` consumes the marker and treats it as a reason to inject even when
+the family has not changed.
+
+Why a marker instead of injecting from the compaction hook: `PostCompact` *cannot*
+inject. The hook reference lists it under "No decision control. Used for side effects
+like logging or cleanup." `SessionStart` with matcher `compact` can inject, and fires
+on the same event - but using it would put the same payload behind a second surface
+with a different output format (`hookSpecificOutput.additionalContext` rather than
+stdout) and a second copy of the resolution logic. One injection path is worth the
+indirection. The cost of the marker route is that a compaction landing mid-turn is not
+refreshed until the next prompt, leaving that turn's remainder unguarded.
+
+This does NOT make `every-turn` redundant for a format rule. A once-per-compaction
+injection is recent right after a compaction and thirty turns stale by the next one,
+which is the same decay more slowly. `every-turn` is ~190 tokens a turn (opus.md is
+779 bytes) - roughly 2% of a 500k session - and what it buys is the rule sitting next
+to the prompt it governs. Keep format rules on `every-turn`; the marker is what makes
+`on-change` trustworthy.
+
 Model identity is read from the transcript, not from a hook field: only SessionStart
 receives a `model`, and it does not re-fire on `/model`. Every assistant record in the
 transcript carries `message.model`, which is the live value.
@@ -70,14 +93,23 @@ def payload_dir() -> Path:
     return Path(__file__).resolve().parent / "model-discipline-payloads"
 
 
-def state_path(session_id: str) -> Path:
+def _state_dir() -> Path:
     # Overridable so a test run gets a fresh state dir; without it, state from an
     # earlier run persists and a "no change" result is indistinguishable from a
     # broken matcher.
     override = os.environ.get("MODEL_DISCIPLINE_STATE_DIR")
     d = Path(override) if override else Path(tempfile.gettempdir()) / f"model-discipline-{os.getuid()}"
     d.mkdir(parents=True, exist_ok=True)
-    return d / f"{session_id}.model"
+    return d
+
+
+def state_path(session_id: str) -> Path:
+    return _state_dir() / f"{session_id}.model"
+
+
+def compact_marker_path(session_id: str) -> Path:
+    """Marker dropped by the PostCompact run, consumed by the next prompt."""
+    return _state_dir() / f"{session_id}.compacted"
 
 
 def known_families() -> tuple[str, ...]:
@@ -172,16 +204,63 @@ def current_family(transcript: Path) -> str | None:
     return None
 
 
+def _mark_compacted(session_id: str) -> None:
+    """PostCompact leg: record that a compaction happened. Writes nothing to stdout.
+
+    PostCompact cannot inject context - the docs list it under "No decision control.
+    Used for side effects like logging or cleanup" - so it drops a marker and the next
+    UserPromptSubmit does the injecting. That indirection is the point: it keeps one
+    injection path and one copy of the payload-resolution logic. SessionStart with
+    matcher `compact` *can* inject, but adding it would mean a second surface emitting
+    the same payload in a different format.
+    """
+    try:
+        compact_marker_path(session_id).write_text("1")
+    except OSError:
+        pass  # fail open: a missed marker costs one un-refreshed payload, not a crash
+
+
+def _consume_compact_marker(session_id: str) -> bool:
+    """True if a compaction happened since the last prompt. Single-shot: deletes it.
+
+    Consumed before the payload is resolved, so a family with no payload file still
+    clears the marker rather than leaving it to fire at some unrelated later turn.
+    """
+    p = compact_marker_path(session_id)
+    try:
+        if not p.exists():
+            return False
+        p.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
         session_id = data.get("session_id")
+        if not isinstance(session_id, str):
+            return 0
+
+        # Which leg is this? Read the event rather than a CLI flag, so the same
+        # command works for both settings entries and a mis-registered event still
+        # does the right thing. Absent (older CLI) means the original behaviour.
+        if data.get("hook_event_name") == "PostCompact":
+            _mark_compacted(session_id)
+            return 0
+
         tp = data.get("transcript_path")
-        if not isinstance(session_id, str) or not isinstance(tp, str):
+        if not isinstance(tp, str):
             return 0
         transcript = Path(tp)
         if not transcript.is_file():
             return 0
+
+        # Consume unconditionally, before any early return below, or a marker left by
+        # a compaction that happened on a turn we said nothing about would survive to
+        # force an injection later, out of context.
+        recompacted = _consume_compact_marker(session_id)
 
         fam = current_family(transcript)
         if fam is None:
@@ -201,7 +280,11 @@ def main() -> int:
         if resolved is None:
             return 0
         text, cadence = resolved
-        if cadence == "on-change" and fam == last:
+        # `recompacted` overrides the on-change short-circuit. Without it an on-change
+        # payload injects once, is summarized away by the first compaction, and never
+        # re-fires because the family has not changed - so a Sonnet stint silently
+        # loses its discipline partway through, with nothing to show it happened.
+        if cadence == "on-change" and fam == last and not recompacted:
             return 0
         print(text)
     except Exception:

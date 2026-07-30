@@ -75,10 +75,13 @@ python3 per-model-discipline/install.py --scope global            # dry run: dif
 python3 per-model-discipline/install.py --scope global --apply    # install, then self-check
 ```
 
-The installer backs up `settings.json`, appends to the existing `UserPromptSubmit` array
-rather than rewriting it, refuses a `settings.json` that is not valid JSON, and is
-idempotent. Then it proves the registered command actually fires. Re-run the check any
-time:
+It registers the same command on two events: `UserPromptSubmit` (which does the
+injecting) and `PostCompact` (which only records that a compaction happened, so an
+`on-change` payload is re-injected on the next prompt instead of being lost to the
+summary). The installer backs up `settings.json`, appends to the existing arrays rather
+than rewriting them, refuses a `settings.json` that is not valid JSON, and is idempotent
+per event - an install predating the `PostCompact` leg adds only the missing one. Then it
+proves the registered command actually fires. Re-run the check any time:
 
 ```bash
 python3 per-model-discipline/install.py --scope global --verify-only
