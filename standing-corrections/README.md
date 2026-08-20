@@ -9,7 +9,7 @@ default behaviour looks like competence.
 |---|---|---|
 | [Suspect the code, not the test](#1-suspect-the-code-not-the-test) | trust inherited work, fix the failing assertion | the assertion is the only thing that noticed |
 | [Cite the landing page](#2-cite-the-landing-page) | link the artefact you actually opened | the artefact is a pinned snapshot; the page is the paper |
-| [One term per concept](#3-one-term-per-concept) | vary word choice for readable prose | in a fixed vocabulary, a synonym reads as a new concept |
+| [One term per concept](#3-one-term-per-concept) | vary word choice for readable prose | in a vocabulary you control, a synonym reads as a new concept (inverts when searching one you do not) |
 
 All three are self-enforced. No hook checks them.
 
@@ -37,6 +37,12 @@ So: read the code path the test exercises, decide what the correct behaviour is,
 then judge the assertion. If you do conclude the test is wrong, say which specific thing it
 asserts incorrectly and why - a diagnosis, not a preference. "The test seems outdated" is the
 sentence to distrust.
+
+One case where the test really is the stale artifact: a deliberate, already-decided refactor
+that renamed or moved what the test asserts against. `../seam-proof-build/` move 5 covers it -
+any edit to certified code makes the certification stale until re-run. That does not weaken
+this rule, it orders it. The refactor has to be the known cause *before* you look at the test,
+not the explanation you reach for once it fails.
 
 ## 2. Cite the landing page
 
@@ -71,7 +77,10 @@ and nothing in the `/abs/` link reveals that.
 ```
 One term per concept, never a synonym for variety - once a project fixes a word
 (rung, stint, freeze, gate), reuse it exactly in prose, code, and docs. Elegant
-variation reads as a NEW concept and silently forks the vocabulary.
+variation reads as a NEW concept and silently forks the vocabulary. This governs
+WRITING into a vocabulary you control; it does not govern SEARCHING one you do
+not - literature and prior-art sweeps require varying vocabulary aggressively,
+because the thing you are looking for was probably named by someone else.
 ```
 
 Good prose style says vary your word choice. In a project with a fixed vocabulary this is
@@ -91,6 +100,14 @@ consistency rule is domain-independent and costs nothing.
 
 Applies to identifiers as much as prose: if the concept is `freeze` in the spec, it is not
 `lock` in a function name.
+
+**Where this rule inverts.** It applies to writing into a vocabulary you control - your specs,
+your code, your docs. It does not apply to searching one you do not. A literature or prior-art
+sweep needs the opposite move: `../literature-scope-discipline/` requires 5-6 query framings
+with vocabulary varied aggressively, precisely because another field named your concept
+differently. Fixing your own terms is what makes your project legible; assuming everyone else
+fixed the same terms is how a novelty claim gets made against ground that is already occupied.
+Consistency is an output discipline, not an input filter.
 
 ---
 

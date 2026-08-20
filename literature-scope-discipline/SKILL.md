@@ -126,6 +126,9 @@ To claim a gap is open:
 1. **Run at least 5-6 different query framings**, varying vocabulary aggressively
    (synonyms for the concept, the method, and the object). The thing you are
    looking for, if it exists, was likely named differently than you would name it.
+   If a one-term-per-concept rule is in force for your project's own writing, it does
+   not apply here - that rule governs the vocabulary you control, this step is about
+   the ones you do not.
 2. **Full-text every on-target hit** before concluding - abstracts overstate.
 3. **Apply moves 1-6** to each hit: scope, quantifier, code, authorship, target,
    vocabulary.
