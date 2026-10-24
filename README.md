@@ -22,6 +22,7 @@ mechanism for applying it to one model family without imposing it on the others.
 |---|---|---|
 | [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent |
 | [`seam-proof-build/`](seam-proof-build/) | Keeps that discipline running *during* the build: every load-bearing step proven by a real run that could have failed. | skill |
+| [`deneuralyzer/`](deneuralyzer/) | After shipping: treats each stop on a real input as a training example and the code as the model, so fixes are mechanisms that generalize to unseen inputs, not special cases. | skill |
 | [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that blocks "verified" claims with no verification behind them. | prose + hook |
 | [`literature-scope-discipline/`](literature-scope-discipline/) | The source-facing sibling of the above: read papers without being fooled by them. Names the bias that formal presentation lowers scrutiny, seven scope-checking moves, and a novelty-sweep protocol for the symmetric failure of declaring a gap open on shallow absence. | skill |
 | [`experiment-freeze-gate/`](experiment-freeze-gate/) | Eight checks between freezing an experiment design and spending compute on it. Catches specs that are internally broken but pass every downstream check. | skill |
@@ -62,6 +63,7 @@ python3 discipline-compliance-scanner/scan.py --all
 
 - Before writing code: `ground-skill-verifier`
 - While building: `seam-proof-build`
+- After shipping, as real inputs fail: `deneuralyzer`
 - Before spending compute: `experiment-freeze-gate`
 - Across a delegation boundary: `delegated-build-stint`
 - When reporting results: `theory-formation-discipline`
