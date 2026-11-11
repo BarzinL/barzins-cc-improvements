@@ -15,36 +15,49 @@ Added in the Opus 5.5 era. Older additions and changes are in [`CHANGELOG.md`](C
 | 2026-11-11 | [`context-winddown/`](context-winddown/) | A mod that, past a context threshold (default 450000 tokens), asks the agent to finish its step and save state, then compacts when the agent calls `ready_to_compact` and ends its turn. Automatic compaction can fire between two tool calls with no chance to save anything. |
 | 2026-10-23 | [`deneuralyzer/`](deneuralyzer/) | After shipping: each stop on a real input is recorded as a fixture and fixed at the owner of its class, and fixes are judged by how they do on inputs they were not made from. |
 
-Most of them target the same behaviour: **a capable model states an inference as a fact
-without checking.** It will describe how your code is wired without reading it, and report
-work as verified without running it. Push back and it identifies its own error immediately,
-which means the capability was there the whole time. What's missing is something that fires
-before the claim ships.
+The entries address three kinds of failure.
 
-Two entries target a different failure with the same origin. Trained-in epistemic care is
-the right reflex when a claim is uncertain and the wrong one when the answer is short and
-known, and it does not distinguish: the output arrives correct, hedged, structured, and
-unreadable. `response-length-calibration/` is that rule, and `per-model-discipline/` is the
-mechanism for applying it to one model family without imposing it on the others.
+Most target a capable model stating an inference as a fact without checking it. It describes
+how code is wired without reading it, and reports work as verified without running it. When
+challenged it finds its own error at once, so the capability is present; what is missing is a
+check that runs before the claim is made. `ground-skill-verifier`, `seam-proof-build`,
+`theory-formation-discipline`, `literature-scope-discipline`, `experiment-freeze-gate`,
+`delegated-build-stint`, `stopping-rules` and `standing-corrections` each place such a check
+at one stage of the work, and `discipline-compliance-scanner` reads transcripts afterwards to
+find where one was skipped.
+
+Two target the shape of the answer rather than its truth. Trained-in epistemic care is the
+right reflex when a claim is uncertain and the wrong one when the answer is short and known,
+and the model applies it to both: the output arrives correct, hedged, structured and hard to
+read. `response-length-calibration` is the rule, and `per-model-discipline` delivers it to one
+model family without imposing it on the others.
+
+The Opus 5.5 entries target work that runs longer than one conversation can hold.
+`deneuralyzer` covers a pipeline after it ships: a fix made where a real input failed tends to
+encode that input rather than its class, so the next unforeseen input fails too. `heartbeat`
+and `context-winddown` cover a session working unattended for hours. Whatever the agent knows
+only from the conversation survives a compaction only as far as the summary keeps it, so the
+goal, queue and state live in a file the agent re-reads on every fire, and compaction runs
+after the agent has written to that file rather than between two tool calls.
 
 ## Contents
 
 | Directory | What it does | Form | Targeted at |
 |---|---|---|---|
-| [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent | Opus 4.8 |
-| [`seam-proof-build/`](seam-proof-build/) | Keeps that discipline running *during* the build: every load-bearing step proven by a real run that could have failed. | skill | Opus 5 |
+| [`context-winddown/`](context-winddown/) | At a context threshold, asks the agent to finish its step and save state, then compacts when the agent says it is ready, instead of wherever automatic compaction fires. | mod | Opus 5.5 |
+| [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages: a session-only cron job fires a fixed protocol against a per-work file of goal, constraints, checks, queue and STATE, and a hook re-creates the job after restarts and compactions. | skill + hook | Opus 5.5 |
 | [`deneuralyzer/`](deneuralyzer/) | After shipping: treats each stop on a real input as a training example and the code as the model, so fixes are mechanisms that generalize to unseen inputs, not special cases. | skill | Opus 5.5 |
-| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that blocks "verified" claims with no verification behind them. | prose + hook | Opus 4.8 |
-| [`literature-scope-discipline/`](literature-scope-discipline/) | The source-facing sibling of the above: read papers without being fooled by them. Names the bias that formal presentation lowers scrutiny, seven scope-checking moves, and a novelty-sweep protocol for the symmetric failure of declaring a gap open on shallow absence. | skill | Opus 5 |
+| [`standing-corrections/`](standing-corrections/) | Three `CLAUDE.md` rules for defaults that are reasonable in general and wrong in one specific place: trusting inherited code over a failing test, citing the PDF instead of the paper, varying wording inside a fixed vocabulary. | prose | Opus 5 |
+| [`literature-scope-discipline/`](literature-scope-discipline/) | The source-facing sibling of `theory-formation-discipline`: read papers without being fooled by them. Names the bias that formal presentation lowers scrutiny, seven scope-checking moves, and a novelty-sweep protocol for the symmetric failure of declaring a gap open on shallow absence. | skill | Opus 5 |
+| [`response-length-calibration/`](response-length-calibration/) | The counterpart of `stopping-rules`: the moment the model stops too late. A correct answer wrapped in document prose - bolded lead-ins, three-part framings, hedges about intent that was already plain. | prose | Opus 5 |
+| [`per-model-discipline/`](per-model-discipline/) | Per-model-family instructions injected into the user turn, read from payload files. Gates a rule to one family, and keeps it out of subagent contexts. | hook + installer | Opus 5 |
+| [`stopping-rules/`](stopping-rules/) | Four `CLAUDE.md` rules for the moments the model stops too early: stale world facts, patching without a diagnosis, shallow answers, made-up estimates. | prose | Opus 5 |
+| [`discipline-compliance-scanner/`](discipline-compliance-scanner/) | Mines your session transcripts and reports where standing rules were actually broken, with citations. | script | Opus 5 |
+| [`seam-proof-build/`](seam-proof-build/) | Keeps the `/ground` discipline running *during* the build: every load-bearing step proven by a real run that could have failed. | skill | Opus 5 |
 | [`experiment-freeze-gate/`](experiment-freeze-gate/) | Eight checks between freezing an experiment design and spending compute on it. Catches specs that are internally broken but pass every downstream check. | skill | Opus 4.8 |
 | [`delegated-build-stint/`](delegated-build-stint/) | Contract for handing build work to a subagent. Headline rule: a stint never takes custody of a long run. | skill + agent | Opus 4.8 |
-| [`discipline-compliance-scanner/`](discipline-compliance-scanner/) | Mines your session transcripts and reports where standing rules were actually broken, with citations. | script | Opus 5 |
-| [`stopping-rules/`](stopping-rules/) | Four `CLAUDE.md` rules for the moments the model stops too early: stale world facts, patching without a diagnosis, shallow answers, made-up estimates. | prose | Opus 5 |
-| [`response-length-calibration/`](response-length-calibration/) | The moment it stops too late. A correct answer wrapped in document prose - bolded lead-ins, three-part framings, hedges about intent that was already plain. | prose | Opus 5 |
-| [`standing-corrections/`](standing-corrections/) | Three `CLAUDE.md` rules for defaults that are reasonable in general and wrong in one specific place: trusting inherited code over a failing test, citing the PDF instead of the paper, varying wording inside a fixed vocabulary. | prose | Opus 5 |
-| [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages: a session-only cron job fires a fixed protocol against a per-work file of goal, constraints, checks, queue and STATE, and a hook re-creates the job after restarts and compactions. | skill + hook | Opus 5.5 |
-| [`context-winddown/`](context-winddown/) | At a context threshold, asks the agent to finish its step and save state, then compacts when the agent says it is ready, instead of wherever automatic compaction fires. | mod | Opus 5.5 |
-| [`per-model-discipline/`](per-model-discipline/) | Per-model-family instructions injected into the user turn, read from payload files. Gates a rule to one family, and keeps it out of subagent contexts. | hook + installer | Opus 5 |
+| [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent | Opus 4.8 |
+| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that blocks "verified" claims with no verification behind them. | prose + hook | Opus 4.8 |
 
 ## Install
 
