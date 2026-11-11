@@ -1,0 +1,1 @@
+{ "name": "context-winddown", "version": "0.1.0", "description": "At a context threshold, asks the agent to wind down and save state; compacts when the agent reports it is ready" }

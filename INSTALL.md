@@ -65,7 +65,7 @@ registration step. Confirm with `/help` or by invoking one.
 
 ## 3. The mechanical pieces - these edit `settings.json`
 
-Two hooks and a script. **Hooks bind at session start**, so anything installed here
+Hooks, a mod and a script. **Hooks bind at session start**, so anything installed here
 activates in the *next* session, not the current one. Confirm with `/hooks`.
 
 ### per-model-discipline (has an installer)
@@ -94,6 +94,21 @@ your hooks directory and add it under `Stop`; the JSON block is in
 [that directory's README](theory-formation-discipline/verification-claim-gate/README.md).
 Tune `_ACTION_HINT` to name your project's test and build commands, or it will
 false-positive on real verifications it does not recognize.
+
+### heartbeat (skill plus a hook, register by hand)
+
+Copy `heartbeat/` to `~/.claude/skills/heartbeat/`, then register
+`python3 /home/YOU/.claude/skills/heartbeat/heartbeat.py hook` (absolute path) under both
+`SessionStart` and `PreCompact`. Check: `python3 ~/.claude/skills/heartbeat/test_heartbeat.py`,
+then pipe `{"hook_event_name": "SessionStart", "session_id": "x", "source": "startup"}` into
+the hook command and confirm it exits 0.
+
+### context-winddown (a mod, nothing to register)
+
+Copy `context-winddown/` to `~/.claude/skills/context-winddown/`; a plugin folder there loads
+in every new session. Needs a Claude Code build with the mod API (tested on 2.1.322). Check:
+`claude plugin validate ~/.claude/skills/context-winddown`. The threshold is
+`CONTEXT_WINDDOWN_TOKENS` in the `env` block of `settings.json`, default 450000.
 
 ### discipline-compliance-scanner (nothing to install)
 

@@ -31,6 +31,8 @@ mechanism for applying it to one model family without imposing it on the others.
 | [`stopping-rules/`](stopping-rules/) | Four `CLAUDE.md` rules for the moments the model stops too early: stale world facts, patching without a diagnosis, shallow answers, made-up estimates. | prose |
 | [`response-length-calibration/`](response-length-calibration/) | The moment it stops too late. A correct answer wrapped in document prose - bolded lead-ins, three-part framings, hedges about intent that was already plain. | prose |
 | [`standing-corrections/`](standing-corrections/) | Three `CLAUDE.md` rules for defaults that are reasonable in general and wrong in one specific place: trusting inherited code over a failing test, citing the PDF instead of the paper, varying wording inside a fixed vocabulary. | prose |
+| [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages: a session-only cron job fires a fixed protocol against a per-work file of goal, constraints, checks, queue and STATE, and a hook re-creates the job after restarts and compactions. | skill + hook |
+| [`context-winddown/`](context-winddown/) | At a context threshold, asks the agent to finish its step and save state, then compacts when the agent says it is ready, instead of wherever automatic compaction fires. | mod |
 | [`per-model-discipline/`](per-model-discipline/) | Per-model-family instructions injected into the user turn, read from payload files. Gates a rule to one family, and keeps it out of subagent contexts. | hook + installer |
 
 ## Install
@@ -71,6 +73,8 @@ python3 discipline-compliance-scanner/scan.py --all
 - At the moment of stopping: `stopping-rules`
 - On every reply to you: `response-length-calibration`, delivered by `per-model-discipline`
 - On a failing test, a citation, or a fixed term: `standing-corrections`
+- Between operator messages, on a timer: `heartbeat`
+- As the context fills: `context-winddown`
 
 The first six check a **claim**, so parts of them can be enforced mechanically: the
 verification-claim gate is a hook, the scanner is a program. `stopping-rules` checks a
