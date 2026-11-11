@@ -1,8 +1,19 @@
 # Barzin's Claude Code Improvements
 
 Skills, hooks, and standing rules that make Claude Code verify things instead of guessing.
-Each one was written after a specific failure in real production work with Opus 4.8, and
-each says which failure.
+Each one was written after a specific failure in real production work with Opus 4.8, Opus 5
+or Opus 5.5, and each says which failure. The Contents table names the model each one was
+written against.
+
+## What's new
+
+Added in the Opus 5.5 era. Older additions and changes are in [`CHANGELOG.md`](CHANGELOG.md).
+
+| Date | Directory | What it does |
+|---|---|---|
+| 2026-11-11 | [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages. A session-only cron job fires a fixed protocol (count, orient from a file, run checks, zoom out against the goal, take one verified step, record STATE) against a per-work file, so the work survives compaction. A hook re-creates the job after a restart and makes compaction summaries carry unrecorded state. |
+| 2026-11-11 | [`context-winddown/`](context-winddown/) | A mod that, past a context threshold (default 450000 tokens), asks the agent to finish its step and save state, then compacts when the agent calls `ready_to_compact` and ends its turn. Automatic compaction can fire between two tool calls with no chance to save anything. |
+| 2026-10-23 | [`deneuralyzer/`](deneuralyzer/) | After shipping: each stop on a real input is recorded as a fixture and fixed at the owner of its class, and fixes are judged by how they do on inputs they were not made from. |
 
 Most of them target the same behaviour: **a capable model states an inference as a fact
 without checking.** It will describe how your code is wired without reading it, and report
@@ -18,22 +29,22 @@ mechanism for applying it to one model family without imposing it on the others.
 
 ## Contents
 
-| Directory | What it does | Form |
-|---|---|---|
-| [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent |
-| [`seam-proof-build/`](seam-proof-build/) | Keeps that discipline running *during* the build: every load-bearing step proven by a real run that could have failed. | skill |
-| [`deneuralyzer/`](deneuralyzer/) | After shipping: treats each stop on a real input as a training example and the code as the model, so fixes are mechanisms that generalize to unseen inputs, not special cases. | skill |
-| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that blocks "verified" claims with no verification behind them. | prose + hook |
-| [`literature-scope-discipline/`](literature-scope-discipline/) | The source-facing sibling of the above: read papers without being fooled by them. Names the bias that formal presentation lowers scrutiny, seven scope-checking moves, and a novelty-sweep protocol for the symmetric failure of declaring a gap open on shallow absence. | skill |
-| [`experiment-freeze-gate/`](experiment-freeze-gate/) | Eight checks between freezing an experiment design and spending compute on it. Catches specs that are internally broken but pass every downstream check. | skill |
-| [`delegated-build-stint/`](delegated-build-stint/) | Contract for handing build work to a subagent. Headline rule: a stint never takes custody of a long run. | skill + agent |
-| [`discipline-compliance-scanner/`](discipline-compliance-scanner/) | Mines your session transcripts and reports where standing rules were actually broken, with citations. | script |
-| [`stopping-rules/`](stopping-rules/) | Four `CLAUDE.md` rules for the moments the model stops too early: stale world facts, patching without a diagnosis, shallow answers, made-up estimates. | prose |
-| [`response-length-calibration/`](response-length-calibration/) | The moment it stops too late. A correct answer wrapped in document prose - bolded lead-ins, three-part framings, hedges about intent that was already plain. | prose |
-| [`standing-corrections/`](standing-corrections/) | Three `CLAUDE.md` rules for defaults that are reasonable in general and wrong in one specific place: trusting inherited code over a failing test, citing the PDF instead of the paper, varying wording inside a fixed vocabulary. | prose |
-| [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages: a session-only cron job fires a fixed protocol against a per-work file of goal, constraints, checks, queue and STATE, and a hook re-creates the job after restarts and compactions. | skill + hook |
-| [`context-winddown/`](context-winddown/) | At a context threshold, asks the agent to finish its step and save state, then compacts when the agent says it is ready, instead of wherever automatic compaction fires. | mod |
-| [`per-model-discipline/`](per-model-discipline/) | Per-model-family instructions injected into the user turn, read from payload files. Gates a rule to one family, and keeps it out of subagent contexts. | hook + installer |
+| Directory | What it does | Form | Targeted at |
+|---|---|---|---|
+| [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent | Opus 4.8 |
+| [`seam-proof-build/`](seam-proof-build/) | Keeps that discipline running *during* the build: every load-bearing step proven by a real run that could have failed. | skill | Opus 5 |
+| [`deneuralyzer/`](deneuralyzer/) | After shipping: treats each stop on a real input as a training example and the code as the model, so fixes are mechanisms that generalize to unseen inputs, not special cases. | skill | Opus 5.5 |
+| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that blocks "verified" claims with no verification behind them. | prose + hook | Opus 4.8 |
+| [`literature-scope-discipline/`](literature-scope-discipline/) | The source-facing sibling of the above: read papers without being fooled by them. Names the bias that formal presentation lowers scrutiny, seven scope-checking moves, and a novelty-sweep protocol for the symmetric failure of declaring a gap open on shallow absence. | skill | Opus 5 |
+| [`experiment-freeze-gate/`](experiment-freeze-gate/) | Eight checks between freezing an experiment design and spending compute on it. Catches specs that are internally broken but pass every downstream check. | skill | Opus 4.8 |
+| [`delegated-build-stint/`](delegated-build-stint/) | Contract for handing build work to a subagent. Headline rule: a stint never takes custody of a long run. | skill + agent | Opus 4.8 |
+| [`discipline-compliance-scanner/`](discipline-compliance-scanner/) | Mines your session transcripts and reports where standing rules were actually broken, with citations. | script | Opus 5 |
+| [`stopping-rules/`](stopping-rules/) | Four `CLAUDE.md` rules for the moments the model stops too early: stale world facts, patching without a diagnosis, shallow answers, made-up estimates. | prose | Opus 5 |
+| [`response-length-calibration/`](response-length-calibration/) | The moment it stops too late. A correct answer wrapped in document prose - bolded lead-ins, three-part framings, hedges about intent that was already plain. | prose | Opus 5 |
+| [`standing-corrections/`](standing-corrections/) | Three `CLAUDE.md` rules for defaults that are reasonable in general and wrong in one specific place: trusting inherited code over a failing test, citing the PDF instead of the paper, varying wording inside a fixed vocabulary. | prose | Opus 5 |
+| [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages: a session-only cron job fires a fixed protocol against a per-work file of goal, constraints, checks, queue and STATE, and a hook re-creates the job after restarts and compactions. | skill + hook | Opus 5.5 |
+| [`context-winddown/`](context-winddown/) | At a context threshold, asks the agent to finish its step and save state, then compacts when the agent says it is ready, instead of wherever automatic compaction fires. | mod | Opus 5.5 |
+| [`per-model-discipline/`](per-model-discipline/) | Per-model-family instructions injected into the user turn, read from payload files. Gates a rule to one family, and keeps it out of subagent contexts. | hook + installer | Opus 5 |
 
 ## Install
 
@@ -101,7 +112,7 @@ self-enforced discipline a guarantee would be the exact failure these exist to p
 is also why `discipline-compliance-scanner` exists: run against real work, it found
 bright-line rules broken hundreds of times by an agent that had "known" them throughout.
 
-MIT licensed. Written against Opus 4.8 and Opus 5; the disciplines are model-agnostic, and
+MIT licensed. Written against Opus 4.8, Opus 5 and Opus 5.5; the disciplines are model-agnostic, and
 the transcript paths and payload shapes are Claude Code specific.
 `response-length-calibration` came out of Opus 5 work specifically - the coding was strong
 enough that response verbosity became the bottleneck, which is not where the earlier entries
