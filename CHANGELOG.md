@@ -4,6 +4,28 @@ Newest first. The most recent additions are also summarized under "What's new" i
 [README](README.md); entries move out of that section, not out of this file. Each heading
 names the model that was the main one in use when the entry was written.
 
+## 2026-11-14 (Opus 5.5)
+
+Written by Opus 5.5 subagents against the shortcomings Anthropic's Opus 5.5 system card
+reports, to a plan and acceptance cases set by a separate session. None of the hooks has
+run in a live session yet.
+
+- Revised the verification-claim gate: claims are matched by kind to supporting commands;
+  tool results are read (`is_error`, failure summaries in output); whole-file claims are
+  checked against Read ranges; the final message comes from `last_assistant_message`; a
+  turn starts at a record with `turnPosition`, so injected `isMeta` records no longer reset
+  it; "healthy" counts only about running systems; fails open on any exception. Added
+  `replay.py` (offline replay, blind labelling sample, scoring).
+- Added [`plan-reconciliation/`](plan-reconciliation/): a Stop hook that makes dropped plan
+  items visible in the final report (system card §2.3.3).
+- Added [`placeholder-disclosure/`](placeholder-disclosure/): a Stop hook that lists
+  undisclosed placeholder code written in the turn (system card §6.2.2), and a draft
+  "blocked is an accepted result" rule.
+- Added [`pasted-text-guard/`](pasted-text-guard/): an invisible-character detector for
+  system card §6.5.1, with the evidence on what Claude Code already strips and marks.
+- Added [`request-fidelity-review/`](request-fidelity-review/): a user-message extractor
+  and a reviewer subagent for system card §2.3.3. The trial on past sessions is not yet run.
+
 ## 2026-11-11 (Opus 5.5)
 
 - Added [`heartbeat/`](heartbeat/): `/heartbeat` keeps a session working between operator

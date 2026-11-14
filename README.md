@@ -11,6 +11,11 @@ Added in the Opus 5.5 era. Older additions and changes are in [`CHANGELOG.md`](C
 
 | Date | Directory | What it does |
 |---|---|---|
+| 2026-11-14 | [`theory-formation-discipline/verification-claim-gate/`](theory-formation-discipline/verification-claim-gate/) | The claim gate, revised for Opus 5.5, now ties each claim to the check that would support it: a test claim needs a test command that did not fail, and a whole-file claim is compared with the Read line ranges. Adds `replay.py` to run a gate offline over your own transcripts. |
+| 2026-11-14 | [`plan-reconciliation/`](plan-reconciliation/) | A Stop hook: when the session has a checklist at `<scratchpad>/plan.md`, a final report that leaves open items unmentioned is paused once, listing them to be reported as done, deferred or dropped. |
+| 2026-11-14 | [`placeholder-disclosure/`](placeholder-disclosure/) | A Stop hook: placeholder code written this turn (`todo!()`, `NotImplementedError`, pass-only bodies, TODO/FIXME comments) that the final message does not disclose is listed by file and line, once. Includes a draft "blocked" `CLAUDE.md` rule, not installed. |
+| 2026-11-14 | [`pasted-text-guard/`](pasted-text-guard/) | Finds invisible and bidirectional-control characters in text while keeping the joiners Persian, Arabic, Indic scripts and emoji need. A library and command line, not a hook: Claude Code 2.1.277+ already strips these before a hook would run. The README records that evidence and that pasted text goes unmarked when editor telemetry is off. |
+| 2026-11-14 | [`request-fidelity-review/`](request-fidelity-review/) | Extracts the messages the user actually typed from a session transcript, and a reviewer subagent that gets only that extract and the diff, so review is against the user's words, not the implementer's summary. The reviewer has not been trialled yet. |
 | 2026-11-11 | [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages. A session-only cron job fires a fixed protocol (count, orient from a file, run checks, zoom out against the goal, take one verified step, record STATE) against a per-work file, so the work survives compaction. A hook re-creates the job after a restart and makes compaction summaries carry unrecorded state. |
 | 2026-11-11 | [`context-winddown/`](context-winddown/) | A mod that, past a context threshold (default 450000 tokens), asks the agent to finish its step and save state, then compacts when the agent calls `ready_to_compact` and ends its turn. Automatic compaction can fire between two tool calls with no chance to save anything. |
 | 2026-10-23 | [`deneuralyzer/`](deneuralyzer/) | After shipping: each stop on a real input is recorded as a fixture and fixed at the owner of its class, and fixes are judged by how they do on inputs they were not made from. |
@@ -44,6 +49,10 @@ after the agent has written to that file rather than between two tool calls.
 
 | Directory | What it does | Form | Targeted at |
 |---|---|---|---|
+| [`plan-reconciliation/`](plan-reconciliation/) | Pauses a turn once when the final report does not account for every open item of the session's plan checklist. | hook | Opus 5.5 |
+| [`placeholder-disclosure/`](placeholder-disclosure/) | Pauses a turn once when placeholder code written this turn is not disclosed in the final message. | hook | Opus 5.5 |
+| [`pasted-text-guard/`](pasted-text-guard/) | Detects hidden Unicode in text without flagging Persian, Arabic or emoji. | script | Opus 5.5 |
+| [`request-fidelity-review/`](request-fidelity-review/) | Reviews a diff against only the user's own typed messages. | script + agent | Opus 5.5 |
 | [`context-winddown/`](context-winddown/) | At a context threshold, asks the agent to finish its step and save state, then compacts when the agent says it is ready, instead of wherever automatic compaction fires. | mod | Opus 5.5 |
 | [`heartbeat/`](heartbeat/) | `/heartbeat` keeps a session working between operator messages: a session-only cron job fires a fixed protocol against a per-work file of goal, constraints, checks, queue and STATE, and a hook re-creates the job after restarts and compactions. | skill + hook | Opus 5.5 |
 | [`deneuralyzer/`](deneuralyzer/) | After shipping: treats each stop on a real input as a training example and the code as the model, so fixes are mechanisms that generalize to unseen inputs, not special cases. | skill | Opus 5.5 |
@@ -57,7 +66,7 @@ after the agent has written to that file rather than between two tool calls.
 | [`experiment-freeze-gate/`](experiment-freeze-gate/) | Eight checks between freezing an experiment design and spending compute on it. Catches specs that are internally broken but pass every downstream check. | skill | Opus 4.8 |
 | [`delegated-build-stint/`](delegated-build-stint/) | Contract for handing build work to a subagent. Headline rule: a stint never takes custody of a long run. | skill + agent | Opus 4.8 |
 | [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent | Opus 4.8 |
-| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that blocks "verified" claims with no verification behind them. | prose + hook | Opus 4.8 |
+| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that pauses a turn once when its final message claims a check (tests pass, build passes, whole file read) that the turn's tool calls do not support. | prose + hook | Opus 4.8; hook revised for Opus 5.5 |
 
 ## Install
 
@@ -119,7 +128,8 @@ None of this makes the model smarter. It makes it more honest about what it actu
 by moving self-correction from after-you-push-back to before-it-speaks.
 
 Most of these are self-enforced, meaning the agent walks itself through them and can skip
-them. Only the two hooks and the scanner are mechanical, and one of those two only delivers
+them. Only the hooks and the scanner are mechanical, the hooks added on 2026-11-14 have not yet
+run in a live session, and the `per-model-discipline` hook only delivers
 a rule rather than checking it. Each README labels which kind it is, because calling a
 self-enforced discipline a guarantee would be the exact failure these exist to prevent. That
 is also why `discipline-compliance-scanner` exists: run against real work, it found
