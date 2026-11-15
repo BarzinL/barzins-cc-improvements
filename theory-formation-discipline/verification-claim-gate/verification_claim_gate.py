@@ -34,17 +34,21 @@ claim followed by "means" or the like (a rule, not a report), a question, and a
 sentence that hedges the claim or attributes it to someone else are not counted.
 
 It is advisory. It pauses at most once per stop cycle (`stop_hook_active`), and
-on any unexpected input it does nothing (fails open). Python standard library
-only. See README.md in this directory.
+on any unexpected input it does nothing (fails open). An optional trial file can
+switch it off in a random half of sessions, so its effect can be measured
+(`trial_arm`; hook-trial/ in the repository). Python standard library only. See
+README.md in this directory.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shlex
 import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 # --------------------------------------------------------------------------
@@ -1082,26 +1086,85 @@ def _reason(problems: list[tuple[str, str]]) -> str:
     )
 
 
+def judge(events: list, text: str | None = None) -> list[tuple[str, str]]:
+    """(claim, what the turn lacks) for each unsupported claim in the final message of
+    the last turn in `events`, the transcript records up to the end of that turn.
+
+    `text` is the final message; when it is missing or empty it is read from the
+    transcript. Used by main() and by analyses that judge recorded turns.
+    """
+    events = [e for e in events if isinstance(e, dict) and e.get("type") in ("user", "assistant")]
+    turn = _turn_events(events)
+    if not isinstance(text, str) or not text.strip():
+        text = _final_text_from_transcript(turn)
+    if not text.strip():
+        return []
+    session = _turn_calls(events)
+    # The turn is a suffix of the session, so its calls are the session's last ones
+    # (the same objects, which _coverage relies on to tell this turn's reads apart).
+    n_turn = len(_turn_calls(turn))
+    return find_problems(text, session[len(session) - n_turn:] if n_turn else [], session)
+
+
+# --------------------------------------------------------------------------
+# Trial switch: the same function, word for word, is in each hook that takes part.
+# --------------------------------------------------------------------------
+
+TRIAL_FILE = os.path.join(".claude", "hook-trial.json")
+
+
+def trial_arm(payload: dict) -> str:
+    """"off" when a hook trial is enabled and this session is in its off arm, else "on".
+
+    The trial file is <project>/.claude/hook-trial.json, where <project> is
+    $CLAUDE_PROJECT_DIR, or the payload's cwd when that variable is unset; if that file
+    does not exist, ~/.claude/hook-trial.json. The first file that exists decides. It
+    holds {"enabled": true, "salt": "...", "start": "YYYY-MM-DD"} (start optional; before
+    that UTC date the trial is not running). The arm is the lowest bit of
+    sha256(salt + ":" + session_id): 0 is on, 1 is off. Anything unexpected (no session
+    id, an unreadable or malformed file, HOOK_TRIAL_IGNORE set) gives "on", so the trial
+    never silences a hook by accident. See hook-trial/README.md in the repository.
+    """
+    try:
+        if os.environ.get("HOOK_TRIAL_IGNORE"):
+            return "on"
+        sid = payload.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            return "on"
+        root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd")
+        paths = [os.path.join(root, TRIAL_FILE)] if isinstance(root, str) and root else []
+        paths.append(os.path.join(os.path.expanduser("~"), TRIAL_FILE))
+        path = next((p for p in paths if os.path.lexists(p)), None)
+        if path is None:
+            return "on"
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        if not isinstance(cfg, dict) or cfg.get("enabled") is not True:
+            return "on"
+        salt = cfg.get("salt")
+        if not isinstance(salt, str) or not salt:
+            return "on"
+        start = cfg.get("start")
+        if start is not None:
+            if not isinstance(start, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start):
+                return "on"
+            if datetime.now(timezone.utc).date() < date.fromisoformat(start):
+                return "on"
+        digest = hashlib.sha256(f"{salt}:{sid}".encode("utf-8")).digest()
+        return "off" if digest[-1] & 1 else "on"
+    except Exception:
+        return "on"
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
-        if not isinstance(data, dict) or data.get("stop_hook_active"):
-            return 0  # not a payload we understand, or already paused once this cycle
+        if not isinstance(data, dict) or trial_arm(data) == "off" or data.get("stop_hook_active"):
+            return 0  # not a payload we understand, the trial's off arm, or already paused once
         transcript = _resolve_transcript(data)
         if transcript is None:
             return 0  # can't see the turn -> fail open
-        events = _load_events(transcript)
-        turn = _turn_events(events)
-        text = data.get("last_assistant_message")
-        if not isinstance(text, str) or not text.strip():
-            text = _final_text_from_transcript(turn)
-        if not text.strip():
-            return 0
-        session = _turn_calls(events)
-        # The turn is a suffix of the session, so its calls are the session's last ones
-        # (the same objects, which _coverage relies on to tell this turn's reads apart).
-        n_turn = len(_turn_calls(turn))
-        problems = find_problems(text, session[len(session) - n_turn:] if n_turn else [], session)
+        problems = judge(_load_events(transcript), data.get("last_assistant_message"))
         if problems:
             print(json.dumps({"decision": "block", "reason": _reason(problems)}))
     except Exception:  # fail open on anything unexpected

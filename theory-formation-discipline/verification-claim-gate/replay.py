@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import random
 import re
 import shutil
@@ -147,6 +148,9 @@ def cmd_run(args) -> int:
     projects = Path(args.projects).expanduser()
     transcripts = sorted(p for p in projects.glob("*/*.jsonl") if p.is_file())
     tmp = Path(tempfile.mkdtemp(prefix="replay-", dir=out))
+    # The replay asks what the gate would have done, so a running hook trial must not
+    # silence it in the trial's off arm (see trial_arm in the gate).
+    gate_env = {**os.environ, "HOOK_TRIAL_IGNORE": "1"}
     records = []
     by_model: Counter = Counter()
     errors = 0
@@ -172,6 +176,7 @@ def cmd_run(args) -> int:
                 r = subprocess.run(
                     [sys.executable, "-I", str(gate_path)],
                     input=json.dumps(payload), capture_output=True, text=True, timeout=60,
+                    env=gate_env,
                 )
                 fired, reason = False, ""
                 if r.stdout.strip():

@@ -208,6 +208,12 @@ from the input that showed it; each defect case failed against the gate before i
 `CLAIM_GATE=/path/to/other/gate.py python3 test_verification_claim_gate.py` runs the same
 cases against another copy of the gate.
 
+`python3 test_hook_trial.py` tests the trial switch: silence in the off arm, the session-id
+vectors shared with the other hooks, every fail-safe case, where the trial file is looked
+for, `HOOK_TRIAL_IGNORE`, and that `replay.py` still sees the gate fire in an off-arm session.
+With a trial file enabled in your home directory, run `test_verification_claim_gate.py` with
+`HOOK_TRIAL_IGNORE=1`, since its cases use your real home directory.
+
 ## Replay over recorded transcripts
 
 `replay.py` runs a gate offline over your own transcripts. At every point where the main
@@ -226,7 +232,20 @@ python3 -I replay.py score --out ~/claim-gate-eval --labels ~/claim-gate-eval/la
 `sample` writes a blind labelling sample (message text and tool calls, no verdicts) with a
 blank `labels.csv`; `score` reports false positives and misses for each gate from the
 filled-in labels. The output contains your conversation text, so `--out` must be outside this
-repository; the script refuses a path inside it.
+repository; the script refuses a path inside it. The replay runs the gate with
+`HOOK_TRIAL_IGNORE=1`, so a running hook trial (below) does not silence it.
+
+## Measuring it on your own work
+
+The gate takes part in the trial described in [`hook-trial/`](../../hook-trial/). With a
+trial file enabled (`<project>/.claude/hook-trial.json` or `~/.claude/hook-trial.json`), it
+stays silent in a random half of sessions, chosen from the session id, together with the
+other three hooks of the trial; `hook-trial/compare_arms.py` compares the two halves
+afterwards. Without a trial file, or with one it cannot read, it behaves as described above.
+
+The analysis judges the final message of every recorded turn with this gate's `judge(events,
+text)`, the function `main()` itself calls, imported from the file given with `--gate`, so
+the trial measures unsupported claims with the gate's own rules rather than a copy of them.
 
 ## Why a hook and not a memory instruction
 

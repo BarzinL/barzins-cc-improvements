@@ -23,15 +23,20 @@ one short token ("B3") is the item's key; mentioning the key counts as mentionin
 the item. Otherwise most of the item's significant words must appear.
 
 Advisory, loop-safe (`stop_hook_active`), silent when it passes, fails open on any
-error. Python standard library only. Install: see README.md.
+error. An optional trial file can switch it off in a random half of sessions, so its
+effect can be measured (`trial_arm`; hook-trial/ in the repository). Python standard
+library only. Install: see README.md.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 import re
 import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 PLAN_FILENAME = "plan.md"
@@ -230,10 +235,58 @@ def evaluate(payload: dict) -> str | None:
     )
 
 
+# --------------------------------------------------------------------- trial --
+# The same function, word for word, is in each hook that takes part.
+TRIAL_FILE = os.path.join(".claude", "hook-trial.json")
+
+
+def trial_arm(payload: dict) -> str:
+    """"off" when a hook trial is enabled and this session is in its off arm, else "on".
+
+    The trial file is <project>/.claude/hook-trial.json, where <project> is
+    $CLAUDE_PROJECT_DIR, or the payload's cwd when that variable is unset; if that file
+    does not exist, ~/.claude/hook-trial.json. The first file that exists decides. It
+    holds {"enabled": true, "salt": "...", "start": "YYYY-MM-DD"} (start optional; before
+    that UTC date the trial is not running). The arm is the lowest bit of
+    sha256(salt + ":" + session_id): 0 is on, 1 is off. Anything unexpected (no session
+    id, an unreadable or malformed file, HOOK_TRIAL_IGNORE set) gives "on", so the trial
+    never silences a hook by accident. See hook-trial/README.md in the repository.
+    """
+    try:
+        if os.environ.get("HOOK_TRIAL_IGNORE"):
+            return "on"
+        sid = payload.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            return "on"
+        root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd")
+        paths = [os.path.join(root, TRIAL_FILE)] if isinstance(root, str) and root else []
+        paths.append(os.path.join(os.path.expanduser("~"), TRIAL_FILE))
+        path = next((p for p in paths if os.path.lexists(p)), None)
+        if path is None:
+            return "on"
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        if not isinstance(cfg, dict) or cfg.get("enabled") is not True:
+            return "on"
+        salt = cfg.get("salt")
+        if not isinstance(salt, str) or not salt:
+            return "on"
+        start = cfg.get("start")
+        if start is not None:
+            if not isinstance(start, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start):
+                return "on"
+            if datetime.now(timezone.utc).date() < date.fromisoformat(start):
+                return "on"
+        digest = hashlib.sha256(f"{salt}:{sid}".encode("utf-8")).digest()
+        return "off" if digest[-1] & 1 else "on"
+    except Exception:
+        return "on"
+
+
 def main() -> int:
     try:
         payload = json.loads(sys.stdin.read())
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or trial_arm(payload) == "off":
             return 0
         reason = evaluate(payload)
     except Exception:  # fail open on anything unexpected

@@ -88,6 +88,14 @@ transcript walk and the pattern-table idea are copied rather than imported.
 
 **Limits that come from Claude Code itself.** The hook reads the session transcript. The official documentation says the transcript is written asynchronously and may not yet include the turn's latest messages when a hook fires, and that the transcript format is internal and changes between versions. So the hook can miss a tool call made at the very end of a turn, and a Claude Code update can break its reading of the transcript without warning. Rerun the tests after an update.
 
+## Measuring it on your own work
+
+The hook takes part in the trial described in [`hook-trial/`](../hook-trial/). With a trial
+file enabled (`<project>/.claude/hook-trial.json` or `~/.claude/hook-trial.json`), it stays
+silent in a random half of sessions, chosen from the session id, together with the other
+three hooks of the trial; `hook-trial/compare_arms.py` compares the two halves afterwards.
+Without a trial file, or with one it cannot read, it behaves as described above.
+
 ## Install
 
 1. Copy `placeholder_disclosure.py` into the project, for example
@@ -127,6 +135,12 @@ Standalone, no pytest. The five acceptance cases from the plan are marked `[plan
 the rest cover Python stubs and their exemptions, comments versus string data, non-code
 files, failed writes, earlier turns, multiple edits to one file, Rust inline tests, the
 transcript fallback, and fail-open on bad input.
+
+`python3 test_hook_trial.py` tests the trial switch: silence in the off arm, the session-id
+vectors shared with the other hooks, every fail-safe case, where the trial file is looked
+for, and `HOOK_TRIAL_IGNORE`. With a trial file enabled in your home directory, run
+`test_placeholder_disclosure.py` with `HOOK_TRIAL_IGNORE=1`, since its cases use your real
+home directory.
 
 ## Status
 

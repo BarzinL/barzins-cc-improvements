@@ -6,6 +6,23 @@ names the model that was the main one in use when the entry was written.
 
 ## 2026-11-15 (Opus 5.5)
 
+- Added [`hook-trial/`](hook-trial/): an optional on/off trial for the claim gate,
+  `plan-reconciliation`, `placeholder-disclosure` and `task-grounding`. With a trial file
+  (`<project>/.claude/hook-trial.json` or `~/.claude/hook-trial.json`) enabled, all four stay
+  silent in sessions where the lowest bit of sha256(salt + ":" + session id) is 1. Off by
+  default; any problem with the file leaves the hooks on. `compare_arms.py` recomputes each
+  session's arm and compares the arms from the transcripts, judging final messages with the
+  claim gate's own `judge()`; the README states what this design can and cannot show. Each
+  hook has a new `test_hook_trial.py`; the existing tests are unchanged and pass.
+- Claim gate: `main()` now calls a new `judge(events, text)`, which the trial's analysis
+  imports. `replay.py` sets `HOOK_TRIAL_IGNORE=1` so a running trial does not silence the gate
+  in a replay.
+- [`task-grounding/`](task-grounding/): "benchmark" alone no longer sets the performance
+  category. It set it for prompts about installing and running a benchmark suite and the disk
+  space its images need. It now counts in "microbenchmark", after "performance", "speed",
+  "timing", "latency", "throughput" or "memory", and as a verb with a piece of code as its
+  object. Eleven new tests: seven such prompts that must stay silent for performance, four
+  that must still set it.
 - [`request-fidelity-review/`](request-fidelity-review/): trialled on five past cases where
   an agent misread the user's intent, plus three controls. It caught 1 of 5. Of its other
   flags, 19 of 30 on the cases and 11 of 17 on the controls were judged noise, by a single

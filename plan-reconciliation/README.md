@@ -113,6 +113,14 @@ directory, give each item a short key (`S1:`), and mark items `[x]` when done."
 
 **No scratchpad, no check.** Per the official documentation a session has a scratchpad only when it is signed in with a claude.ai account (not an API key), uses the Anthropic API (not Bedrock, Google Cloud or Foundry), and `enableArtifact` is not `false`. In other sessions the hook stays silent.
 
+## Measuring it on your own work
+
+The hook takes part in the trial described in [`hook-trial/`](../hook-trial/). With a trial
+file enabled (`<project>/.claude/hook-trial.json` or `~/.claude/hook-trial.json`), it stays
+silent in a random half of sessions, chosen from the session id, together with the other
+three hooks of the trial; `hook-trial/compare_arms.py` compares the two halves afterwards.
+Without a trial file, or with one it cannot read, it behaves as described above.
+
 ## Install
 
 1. Copy `plan_reconciliation.py` into the project, for example
@@ -150,6 +158,12 @@ python3 test_plan_reconciliation.py
 Standalone, no pytest. The six acceptance cases from the plan are marked `[plan]`;
 the rest cover keys, numbered items, the conversational-reply rule, the transcript
 fallback, a harness meta message in the middle of a turn, and fail-open on bad input.
+
+`python3 test_hook_trial.py` tests the trial switch: silence in the off arm, the session-id
+vectors shared with the other hooks, every fail-safe case, where the trial file is looked
+for, and `HOOK_TRIAL_IGNORE`. With a trial file enabled in your home directory, run
+`test_plan_reconciliation.py` with `HOOK_TRIAL_IGNORE=1`, since its cases use your real home
+directory.
 
 ## Status
 

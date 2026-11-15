@@ -69,7 +69,7 @@ On each `UserPromptSubmit`, the hook:
 
 | Category | Matched by (examples) | Directive, in short |
 |---|---|---|
-| performance | optimise / optimization, speed up, run faster, faster than, too slow, slower, latency, throughput, profiling, profiler, flame graph, benchmark, bottleneck, memory usage, hot path | Measure with a rerunnable command before changing anything, rerun it after, report both numbers and the command. |
+| performance | optimise / optimization, speed up, run faster, faster than, too slow, slower, latency, throughput, profiling, profiler, flame graph, microbenchmark, performance or speed benchmark, benchmark it / the parser / the change (a verb with a piece of code as its object), bottleneck, memory usage, hot path | Measure with a rerunnable command before changing anything, rerun it after, report both numbers and the command. |
 | visual | screenshot, mockup, wireframe, page or CSS layout, renderer, render the page / image / chart, diagram, bar or line chart, plot, matplotlib, CSS, SVG, canvas, shader, Figma, CAD, UI, pixel, font | Render the output to an image and look at it before reporting; compare with any reference image. |
 | scientific | simulation, numerical, ODE / PDE solver, finite element, Monte Carlo, Bayesian, linear or logistic regression, statistical test, statistically significant, t-test, p-value, genome, protein or DNA sequences, sequencing, molecule, spectroscopy, FFT, Fourier, eigenvalue, SI units, unit conversion, dimensional analysis, methylation | Say first that this is domain work; look in the project reference; if nothing is there, read primary sources and add an entry; validate against a known answer; state units. |
 | multi-step | end to end, phases, milestones, migration, refactor, roadmap, step by step, or a list of three or more items | Write the steps as a checklist in `plan.md` in the scratchpad, tick them off, account for every item at the end. |
@@ -83,6 +83,15 @@ beside it that places it in the category. This loses some recall: "the simulated
 step diverges" is missed, and "make the plot render faster" sets visual but not
 performance. A directive that fires on ordinary coding prompts costs more than one that
 sometimes misses.
+
+"Benchmark" is narrowed the same way (2026-11-15). On its own it set the performance category
+for prompts about installing and running a benchmark suite, or the disk space its images
+need, which is evaluation work, not making code faster. It now counts in "microbenchmark",
+after "performance", "speed", "timing", "latency", "throughput" or "memory", and as a verb
+whose object is a piece of code ("benchmark it", "benchmark the parser", "benchmark the change
+against the old implementation"). "Run the benchmark suite", "the benchmark runner" and "the
+benchmark's images" no longer set it. Missed as a result: "run the benchmarks again after the
+fix" and "the benchmark shows a regression" without a speed word.
 
 The reader pattern draws its boundary the same way. A deliverable noun counts only
 after a verb of producing or asking for it ("write", "draft", "put together", "I want"),
@@ -190,6 +199,15 @@ Properties:
   the Fable 5.2 card names; until then this is a hypothesis that costs little.
 - Its firing rate on real prompts is unmeasured.
 
+## Measuring it on your own work
+
+The hook takes part in the trial described in [`hook-trial/`](../hook-trial/). With a trial
+file enabled (`<project>/.claude/hook-trial.json` or `~/.claude/hook-trial.json`), it stays
+silent in a random half of sessions, chosen from the session id, together with the other
+three hooks of the trial; `hook-trial/compare_arms.py` compares the two halves afterwards. In
+the off arm it exits before reading its rules and writes no state file. Without a trial file,
+or with one it cannot read, it behaves as described above.
+
 ## Install
 
 1. Copy `task_grounding.py` and `categories.json` into the same directory in the
@@ -225,14 +243,22 @@ Properties:
 python3 test_task_grounding.py
 ```
 
-Standalone, no pytest. 74 cases: one prompt per category, a plain coding prompt, a short
+Standalone, no pytest. 85 cases: one prompt per category, a plain coding prompt, a short
 prompt, harness-tagged input, a slash command, category words only inside pasted code, the
 once-per-session rule within and across categories, two categories in one prompt, the
 session-id fallback, fail-open on malformed input and on an unreadable state file, a
 corrupt state file treated as empty, ten ordinary coding prompts that must stay silent, eight
-prompts that the narrowed patterns must still match, a prompt starting with an absolute
-path, the checker path as found from where the hook is installed, eleven reader prompts
-that must set the reader category, the reader directive's three steps, and sixteen
-ordinary coding prompts about docs, reports, guides and errors that must not set it.
+prompts that the narrowed patterns must still match, seven prompts about setting up and
+running a benchmark suite that must not set performance and four about timing code with a
+benchmark that must, a prompt starting with an absolute path, the checker path as found
+from where the hook is installed, eleven reader prompts that must set the reader category,
+the reader directive's three steps, and sixteen ordinary coding prompts about docs,
+reports, guides and errors that must not set it.
 `TASK_GROUNDING=/path/to/other/task_grounding.py python3 test_task_grounding.py` runs the
 same cases against another copy of the hook.
+
+`python3 test_hook_trial.py` tests the trial switch: silence in the off arm with no state
+file written, the session-id vectors shared with the other hooks, every fail-safe case, where
+the trial file is looked for, and `HOOK_TRIAL_IGNORE`. With a trial file enabled in your home
+directory, run `test_task_grounding.py` with `HOOK_TRIAL_IGNORE=1`, since its cases use your
+real home directory.

@@ -11,6 +11,7 @@ Added in the Opus 5.5 era. Older additions and changes are in [`CHANGELOG.md`](C
 
 | Date | Directory | What it does |
 |---|---|---|
+| 2026-11-15 | [`hook-trial/`](hook-trial/) | Measures four hooks (claim gate, plan-reconciliation, placeholder-disclosure, task-grounding) on your own work. An optional trial file switches all four off in a random half of sessions, chosen from the session id; `compare_arms.py` then compares the two halves from the transcripts: unsupported completion claims that reached the user (judged by the claim gate itself), hook firings, output tokens per turn and follow-up messages, each with a bootstrap interval over sessions. Off by default; no trial has been run yet. |
 | 2026-11-14 | [`task-grounding/`](task-grounding/) | A UserPromptSubmit hook that recognises performance, visual, scientific, multi-step and reader work from the prompt's words and adds one short directive per category, once per session: measure before and after, render and look, read sources before coding, write a plan file, and for a course, guide or long report, state the reading and the reader and show one piece before building the rest (added 2026-11-15). Keyword-matched with narrow patterns, so it misses some prompts and still misfires on others; not yet run live or measured. |
 | 2026-11-14 | [`reference-store/`](reference-store/) | A format for a project's compiled domain reference (`docs/reference/`), in which every claim carries its source, the date it was read, and whether it was read at the source, taken from a secondary source, or inferred; and a checker that refuses untagged claims and finds the one entry a task needs. |
 | 2026-11-14 | [`theory-formation-discipline/verification-claim-gate/`](theory-formation-discipline/verification-claim-gate/) | The claim gate, revised for Opus 5.5, now ties each claim to the check that would support it: a test claim needs a test command that did not fail, and a whole-file claim is compared with the reads. Reads count across the session and include `cat`, `head`, `tail` and `sed -n`, parsed per pipeline; whole-repository claims are flagged; "read through <directory>" and "read all four <documents>" are checked against the reads; speed and memory claims need a timing command. Adds `replay.py` to run a gate offline over your own transcripts. |
@@ -57,6 +58,7 @@ in which every claim says where it came from.
 
 | Directory | What it does | Form | Targeted at |
 |---|---|---|---|
+| [`hook-trial/`](hook-trial/) | Switches four hooks off in a random half of sessions and compares the two halves from the transcripts, with intervals over sessions. | switch in four hooks + script | Opus 5.5 |
 | [`task-grounding/`](task-grounding/) | Adds one directive per category of work (performance, visual, scientific, multi-step, work for a reader), chosen by keywords in the prompt, once per session. | hook | Opus 5.5 |
 | [`reference-store/`](reference-store/) | A compiled domain reference in which every claim records its source, read date and how well it was checked, with a checker and a `--find` lookup. | format + script | Opus 5.5 |
 | [`plan-reconciliation/`](plan-reconciliation/) | Pauses a turn once when the final report does not account for every open item of the session's plan checklist. | hook | Opus 5.5 |
@@ -127,6 +129,7 @@ python3 reference-store/check_reference.py docs/reference --find "methylation"
 - As the context fills: `context-winddown`
 - When a prompt arrives, by category of work: `task-grounding`
 - Before domain work, and whenever a source has been read: `reference-store`
+- Across weeks of sessions, to measure four of the hooks: `hook-trial`
 
 The first six check a **claim**, so parts of them can be enforced mechanically: the
 verification-claim gate is a hook, the scanner is a program. `stopping-rules` checks a

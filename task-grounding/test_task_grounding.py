@@ -132,6 +132,32 @@ def main() -> int:
             _, ctx = run(prompt, d)
             check(f"narrowed pattern still matches -> {want}: {prompt[:50]}", want in ctx)
 
+    # Setting up and running a benchmark suite, and disk space for it, is not work on
+    # making code faster: the performance category must not be set (it was, on "benchmark").
+    for prompt in [
+        "Install the benchmark runner and check that it can pull the task images from the registry.",
+        "Which container runtime should I use for running the benchmark suite, docker or podman?",
+        "How much disk space do the benchmark's container images need? The disk is nearly full.",
+        "Set up the benchmark harness from its README and run the first ten tasks.",
+        "Run the benchmark suite overnight and send me the scores per task in a table.",
+        "Free up disk space so the benchmark images fit, then start the evaluation run.",
+        "Clone the benchmarks repository and list the tasks it contains, with their categories.",
+    ]:
+        with tempfile.TemporaryDirectory() as d:
+            _, ctx = run(prompt, d)
+            check(f"benchmark setup -> performance not set: {prompt[:55]}", "Performance work" not in ctx)
+
+    # "benchmark" still sets performance when it is about timing code.
+    for prompt in [
+        "Benchmark the parser before and after the change and report the timings.",
+        "Write a microbenchmark for the hash function and run it on both branches.",
+        "Add a performance benchmark for the JSON encoder so we can track regressions.",
+        "Can you benchmark it against the old implementation with the large input file?",
+    ]:
+        with tempfile.TemporaryDirectory() as d:
+            _, ctx = run(prompt, d)
+            check(f"benchmark about timing code -> performance: {prompt[:50]}", "Performance work" in ctx)
+
     # Work for a reader: a large deliverable (course, tutorial, guide, documentation,
     # long report, explainer) or a request to be taught from a stated level.
     reader = "Work for a reader"
