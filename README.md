@@ -11,7 +11,9 @@ Added in the Opus 5.5 era. Older additions and changes are in [`CHANGELOG.md`](C
 
 | Date | Directory | What it does |
 |---|---|---|
-| 2026-11-14 | [`theory-formation-discipline/verification-claim-gate/`](theory-formation-discipline/verification-claim-gate/) | The claim gate, revised for Opus 5.5, now ties each claim to the check that would support it: a test claim needs a test command that did not fail, and a whole-file claim is compared with the Read line ranges. Adds `replay.py` to run a gate offline over your own transcripts. |
+| 2026-11-14 | [`task-grounding/`](task-grounding/) | A UserPromptSubmit hook that recognises performance, visual, scientific and multi-step work from the prompt's words and adds one short directive per category, once per session: measure before and after, render and look, read sources before coding, write a plan file. Keyword-matched with narrow patterns, so it misses some prompts and still misfires on others; not yet run live or measured. |
+| 2026-11-14 | [`reference-store/`](reference-store/) | A format for a project's compiled domain reference (`docs/reference/`), in which every claim carries its source, the date it was read, and whether it was read at the source, taken from a secondary source, or inferred; and a checker that refuses untagged claims and finds the one entry a task needs. |
+| 2026-11-14 | [`theory-formation-discipline/verification-claim-gate/`](theory-formation-discipline/verification-claim-gate/) | The claim gate, revised for Opus 5.5, now ties each claim to the check that would support it: a test claim needs a test command that did not fail, and a whole-file claim is compared with the reads. Reads count across the session and include `cat`, `head`, `tail` and `sed -n`, parsed per pipeline; whole-repository claims are flagged; "read through <directory>" and "read all four <documents>" are checked against the reads; speed and memory claims need a timing command. Adds `replay.py` to run a gate offline over your own transcripts. |
 | 2026-11-14 | [`plan-reconciliation/`](plan-reconciliation/) | A Stop hook: when the session has a checklist at `<scratchpad>/plan.md`, a final report that leaves open items unmentioned is paused once, listing them to be reported as done, deferred or dropped. |
 | 2026-11-14 | [`placeholder-disclosure/`](placeholder-disclosure/) | A Stop hook: placeholder code written this turn (`todo!()`, `NotImplementedError`, pass-only bodies, TODO/FIXME comments) that the final message does not disclose is listed by file and line, once. Includes a draft "blocked" `CLAUDE.md` rule, not installed. |
 | 2026-11-14 | [`pasted-text-guard/`](pasted-text-guard/) | Finds invisible and bidirectional-control characters in text while keeping the joiners Persian, Arabic, Indic scripts and emoji need. A library and command line, not a hook: Claude Code 2.1.277+ already strips these before a hook would run. The README records that evidence and that pasted text goes unmarked when editor telemetry is off. |
@@ -45,10 +47,18 @@ only from the conversation survives a compaction only as far as the summary keep
 goal, queue and state live in a file the agent re-reads on every fire, and compaction runs
 after the agent has written to that file rather than between two tool calls.
 
+`task-grounding` and `reference-store` target the categories where Anthropic's Fable 5.2
+system card reports Opus 5.5 furthest behind: performance optimisation, scientific
+computing and visual work (§8.7). The category is decided by the prompt's words rather than
+by the model noticing it is out of its depth, and domain facts come from a local reference
+in which every claim says where it came from.
+
 ## Contents
 
 | Directory | What it does | Form | Targeted at |
 |---|---|---|---|
+| [`task-grounding/`](task-grounding/) | Adds one directive per category of work (performance, visual, scientific, multi-step), chosen by keywords in the prompt, once per session. | hook | Opus 5.5 |
+| [`reference-store/`](reference-store/) | A compiled domain reference in which every claim records its source, read date and how well it was checked, with a checker and a `--find` lookup. | format + script | Opus 5.5 |
 | [`plan-reconciliation/`](plan-reconciliation/) | Pauses a turn once when the final report does not account for every open item of the session's plan checklist. | hook | Opus 5.5 |
 | [`placeholder-disclosure/`](placeholder-disclosure/) | Pauses a turn once when placeholder code written this turn is not disclosed in the final message. | hook | Opus 5.5 |
 | [`pasted-text-guard/`](pasted-text-guard/) | Detects hidden Unicode in text without flagging Persian, Arabic or emoji. | script | Opus 5.5 |
@@ -66,7 +76,7 @@ after the agent has written to that file rather than between two tool calls.
 | [`experiment-freeze-gate/`](experiment-freeze-gate/) | Eight checks between freezing an experiment design and spending compute on it. Catches specs that are internally broken but pass every downstream check. | skill | Opus 4.8 |
 | [`delegated-build-stint/`](delegated-build-stint/) | Contract for handing build work to a subagent. Headline rule: a stint never takes custody of a long run. | skill + agent | Opus 4.8 |
 | [`ground-skill-verifier/`](ground-skill-verifier/) | `/ground` turns assumptions about your codebase into verified facts before any code is written. A cold verifier subagent then re-checks the evidence. | skill + agent | Opus 4.8 |
-| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that pauses a turn once when its final message claims a check (tests pass, build passes, whole file read) that the turn's tool calls do not support. | prose + hook | Opus 4.8; hook revised for Opus 5.5 |
+| [`theory-formation-discipline/`](theory-formation-discipline/) | Nine moves for reasoning like a researcher without fooling yourself, plus a Stop hook that pauses a turn once when its final message claims a check (tests pass, build passes, whole file or repository read, a measured speed-up) that the session's tool calls do not support. | prose + hook | Opus 4.8; hook revised for Opus 5.5 |
 
 ## Install
 
@@ -80,7 +90,7 @@ and install the parts that fit this project.
 
 By hand: skills go in `.claude/skills/<name>/SKILL.md`, project-local or global
 (`~/.claude/skills/`), agent definitions in `.claude/agents/`, prose into your `CLAUDE.md`.
-Each directory's README has the exact paths and an example invocation. Three that differ:
+Each directory's README has the exact paths and an example invocation. Some that differ:
 
 ```bash
 # per-model-discipline - has an installer; dry run by default, self-checks after applying
@@ -92,6 +102,13 @@ python3 discipline-compliance-scanner/scan.py --all
 
 # verification-claim-gate - a Stop hook, needs registering in .claude/settings.json
 # see theory-formation-discipline/verification-claim-gate/README.md
+
+# task-grounding - a UserPromptSubmit hook, needs registering in .claude/settings.json
+# see task-grounding/README.md
+
+# reference-store - check a project's docs/reference/, or find the entry for a term
+python3 reference-store/check_reference.py docs/reference
+python3 reference-store/check_reference.py docs/reference --find "methylation"
 ```
 
 ## Where each one fires
@@ -108,6 +125,8 @@ python3 discipline-compliance-scanner/scan.py --all
 - On a failing test, a citation, or a fixed term: `standing-corrections`
 - Between operator messages, on a timer: `heartbeat`
 - As the context fills: `context-winddown`
+- When a prompt arrives, by category of work: `task-grounding`
+- Before domain work, and whenever a source has been read: `reference-store`
 
 The first six check a **claim**, so parts of them can be enforced mechanically: the
 verification-claim gate is a hook, the scanner is a program. `stopping-rules` checks a
@@ -121,6 +140,11 @@ harness runs it, so the rule is present on every turn and does not decay at the 
 compaction the way a memory note does - and says nothing about whether the rule was
 followed. Worth keeping straight: a hook that reliably delivers an instruction is not a hook
 that enforces one.
+
+`task-grounding` is the same kind: it delivers a directive when the prompt's words put the
+work in a category, and checks nothing. `reference-store` is mechanical about provenance
+only. Its checker refuses a reference claim that does not say where it came from and how
+well it was checked, and cannot tell whether the claim is true.
 
 ## Caveats
 

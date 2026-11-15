@@ -25,6 +25,34 @@ run in a live session yet.
   system card §6.5.1, with the evidence on what Claude Code already strips and marks.
 - Added [`request-fidelity-review/`](request-fidelity-review/): a user-message extractor
   and a reviewer subagent for system card §2.3.3. The trial on past sessions is not yet run.
+- Claim gate, second revision: whole-file coverage counts reads from every turn of the
+  session; `sed -n`, `head` and `cat` count as reads; claims to have read a whole
+  repository or codebase are always flagged; speed and memory claims ("3x faster",
+  "reduced memory usage by 40%") need a timing or benchmark command in the turn. Eleven
+  tests added (`S-1` to `S-7`, `P-1` to `P-4`).
+- Claim gate, fixes from review of the second revision, each with a test that failed
+  first (`G-1` to `G-13`): shell reads are parsed per pipeline, so `cat FILE | head -30`
+  is a partial read, a `cat` in a heredoc or written to a file is no read, `cat -n` and
+  several files count, and output Claude Code cut short is a partial read; paths are
+  resolved against the recorded working directory and matched by path suffix, not base
+  name; a named file never read fails the claim; "the entire project brief" is no longer a
+  repository claim; timing commands must be in command position; "runs in 40 minutes"
+  without "now" or a before-and-after is not a speed claim; "all pass means ..." is a rule,
+  not a report; "I've read through <directory>" and "I read all four <documents>" are
+  checked against the session's reads. `S-5` now uses the `cat | head` command alone, and
+  the two-command form is `S-5b`.
+- Added [`task-grounding/`](task-grounding/): a UserPromptSubmit hook that adds one
+  directive per category of work (performance, visual, scientific, multi-step), chosen by
+  keywords, once per session. Targets the categories where the Fable 5.2 system card
+  reports Opus 5.5 furthest behind (§8.7). Not run live; effect unmeasured. After review:
+  narrower patterns (ten ordinary coding prompts that misfired are now silent tests), a
+  prompt starting with an absolute path is no longer taken for a slash command, a corrupt
+  state file is treated as empty, and the scientific directive names the reference checker
+  by an absolute path found from the hook's own location.
+- Added [`reference-store/`](reference-store/): the format of a project's compiled domain
+  reference, where every claim is tagged with its source, read date and status (`source`,
+  `secondary`, `inferred`), and `check_reference.py`, which validates a reference and
+  finds the entry for a search term. Includes a small example reference.
 
 ## 2026-11-11 (Opus 5.5)
 

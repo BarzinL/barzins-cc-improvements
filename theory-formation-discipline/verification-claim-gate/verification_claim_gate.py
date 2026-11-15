@@ -19,13 +19,19 @@ What counts as support depends on the claim:
   ls, cat, grep and the like) and did not fail, or an HTTP fetch;
 - a "no errors" / "healthy" / "I've confirmed" claim needs any observing tool
   call (a command, a Read, a search, a fetch);
+- a speed or memory claim ("3x faster", "now runs in 1.2 s") needs a timing or
+  benchmark program, in command position, that did not fail;
 - a whole-file claim ("read the whole file", "read X in full") is compared with
-  the Read calls: the file must have been read with no line limit, or with reads
-  that together cover every line.
+  the reads of the whole session (Read calls, and cat / head / tail / sed -n at the
+  end of a pipeline): the file must have been read with no line limit, or with reads
+  that together cover every line; a named file that was never read fails;
+- a whole-repository claim is always flagged; "read through <dir>" fails if a file
+  read under that directory was read only in part; "read all four <noun>s" fails if
+  fewer files named like the noun were read in full than the claim counts.
 
 A claim inside a code block or a quotation, a negated or conditional claim, a
-question, and a sentence that hedges the claim or attributes it to someone else
-are not counted.
+claim followed by "means" or the like (a rule, not a report), a question, and a
+sentence that hedges the claim or attributes it to someone else are not counted.
 
 It is advisory. It pauses at most once per stop cycle (`stop_hook_active`), and
 on any unexpected input it does nothing (fails open). Python standard library
@@ -37,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -110,6 +117,60 @@ _SCOPE_CLAIM = re.compile(
     re.IGNORECASE,
 )
 
+# A measured speed or size change. Support is a timing or benchmark command. A
+# plain "runs in 40 minutes" is usually background, not a measurement, so a time
+# counts only with "now" or as a change ("from 900 ms to 300 ms").
+_UNIT = r"(?:ms|µs|us|ns|s|secs?|seconds?|mins?|minutes?|h|hours?|[KMG]i?B|%)"
+_PERF_CLAIM = re.compile(
+    r"\b\d+(?:\.\d+)? ?(?:x|×|%|percent|times) (?:faster|slower|quicker|speed-?up|less memory|smaller)\b"
+    r"|\b(?:speed-?up|sped up|speeds up) (?:of|by) (?:about |roughly |~)?\d"
+    r"|\b(?:reduc|cut|lower|dropp|improv)\w* (?:the )?(?:latency|runtime|run time|wall time|memory(?: use| usage)?|"
+    r"build time|startup time|throughput) (?:by|from) (?:about |roughly |~)?\d"
+    r"|\bnow (?:runs?|takes?|completes?|finishes) (?:in )?(?:about |roughly |~)?\d+(?:\.\d+)? ?" + _UNIT + r"(?!\w)"
+    r"|\b(?:dropped|fell|went|came|is|are|was) (?:down )?from (?:about |roughly |~)?\d+(?:\.\d+)? ?" + _UNIT
+    + r"? to (?:about |roughly |~)?\d",
+    re.IGNORECASE,
+)
+
+# A claim to have read a whole repository or codebase. Reads cannot be shown
+# to cover one, so this is always asked to be restated as what was read. The noun
+# must end the phrase ("the entire project brief" is about a document).
+_REPO_CLAIM = re.compile(
+    r"\b(?:read(?: through)?|reviewed|went through|gone through|looked through|audited) "
+    r"(?:the |this |that |your )?(?:whole|entire|full|complete) (?:repo(?:sitory)?|codebase|code base|project|source tree)"
+    r"(?=\s*(?:[.,;:!?)]|$)|\s+(?:and|but|or|to|for|in|of|at|on|with|before|after|from|so|then|which|that|is|was|"
+    r"looks?|seems?|again|once|now|first|today|carefully|end)\b)"
+    r"|\bread (?:through )?every file\b",
+    re.IGNORECASE,
+)
+
+# "I've read through widget-core", "went through src/": a read of a directory. Judged
+# only when the name is a directory of files read in the session.
+_DIR_CLAIM = re.compile(
+    r"\b(?:read|gone|went|looked) through (?:the |all of |all |your |this )?"
+    r"(?P<d>[\w.-]*[\w-](?:/[\w.-]*[\w-])*)/?(?: (?:repo(?:sitory)?|directory|folder|codebase|project|tree))?"
+    r"(?=[\s.,;:!?)]|$)",
+    re.IGNORECASE,
+)
+
+# "I read all four handoffs": a count of documents, judged against the files read
+# in full in the session whose names contain the noun.
+_NUMBERS = {"both": 2, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+            "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+_COUNT_CLAIM = re.compile(
+    r"\bread (?:all |each of |every one of )?(?:the |my |your )?(?P<n>\d+|" + "|".join(_NUMBERS) + r") "
+    r"(?:of the )?(?P<noun>[a-z][a-z-]{2,}?)s\b",
+    re.IGNORECASE,
+)
+
+# Words right after a claim that make it a definition or a rule, not a report:
+# "all pass means the task counts as solved".
+_GENERIC_AFTER = re.compile(
+    r"^\s*(?:(?:means?|meaning|implies|indicates|counts? as|is (?:what|how|required|needed|enough|the (?:goal|bar|"
+    r"criterion|condition))|are (?:required|needed))\b|=)",
+    re.IGNORECASE,
+)
+
 # A command quoted in the message (replaced by CMDn) said to pass.
 _CITED_CLAIM = re.compile(
     r"\bCMD(\d+) (?:now |still |also )?(?:pass(?:es|ed)?|succeed(?:s|ed)?|"
@@ -124,6 +185,7 @@ _TURN_CLAIMS = (
     ("build", _BUILD_CLAIM),
     ("run", _RUN_CLAIM),
     ("observe", _OBSERVE_CLAIM),
+    ("perf", _PERF_CLAIM),
 )
 
 # A sentence containing one of these is already flagging the gap, attributing
@@ -271,6 +333,7 @@ class Call:
         self.result_text: str | None = None
         self.is_error = False
         self.result_meta = None  # the transcript's toolUseResult for this call
+        self.cwd = ""  # the working directory the transcript records for the call, if any
 
     @property
     def command(self) -> str:
@@ -311,6 +374,8 @@ def _turn_calls(events: list[dict]) -> list[Call]:
                 continue
             if e.get("type") == "assistant" and b.get("type") == "tool_use":
                 call = Call(str(b.get("name", "")), b.get("input", {}))
+                cwd = e.get("cwd")
+                call.cwd = cwd if isinstance(cwd, str) and cwd.startswith("/") else ""
                 calls.append(call)
                 if b.get("id"):
                     by_id[b["id"]] = call
@@ -353,6 +418,36 @@ def _cited_ok(span: str, calls: list[Call]) -> bool:
     return last is not None and not last.failed()
 
 
+_TIMERS = frozenset("time hyperfine valgrind heaptrack wrk k6 pyperf".split())
+_INTERPRETERS = frozenset("python python3 node bash sh zsh ruby perl deno bun uv".split())
+_TIMED_RUN = re.compile(
+    r"^(?:cargo (?:bench|criterion)\b|go test\b.*\s-bench|(?:python3? -m )?pytest\b.*--benchmark|"
+    r"python3? -m (?:timeit|pyperf)\b|perf (?:stat|record)\b|strace\b.*\s-c\b|ab\b.*\s-n\b)"
+)
+
+
+def _is_timing(command: str) -> bool:
+    """A segment of the command whose program, in command position, times or benchmarks."""
+    if re.search(r"\bEXPLAIN ANALYZE\b", command, re.IGNORECASE):
+        return True
+    for seg in _segments(command):
+        words = seg.replace("(", " ").replace("{", " ").split()
+        i = 0
+        while i < len(words) and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[i]) or words[i] in
+                                  ("sudo", "nice", "nohup", "exec", "env", "command", "stdbuf", "ionice", "timeout")):
+            i += 2 if words[i] == "timeout" and i + 1 < len(words) and not words[i + 1].startswith("-") else 1
+        if i >= len(words):
+            continue
+        prog = os.path.basename(words[i])
+        if prog in _TIMERS or "bench" in prog.lower() or _TIMED_RUN.match(" ".join([prog] + words[i + 1:])):
+            return True
+        if prog in _INTERPRETERS:
+            args = [w for w in words[i + 1:] if not w.startswith("-") and w not in ("run", "exec")]
+            if args and "bench" in os.path.basename(args[0]).lower():
+                return True
+    return False
+
+
 def _support(kind: str, calls: list[Call], spans: list[str]) -> str | None:
     """None if the turn supports a claim of this kind, else what is missing."""
     if kind in ("test", "build", "run"):
@@ -380,6 +475,13 @@ def _support(kind: str, calls: list[Call], spans: list[str]) -> str | None:
         if all(c.failed() for c in runs):
             return "every command run in this turn failed"
         return None
+    if kind == "perf":
+        timed = [c for c in calls if c.name == "Bash" and _is_timing(c.command)]
+        if not timed:
+            return "no timing or benchmark command ran in this turn" + _ran_note(calls)
+        if all(c.failed() for c in timed):
+            return "every timing or benchmark command in this turn failed"
+        return None
     if kind == "observe":
         if any(c.name not in _NON_OBSERVING_TOOLS for c in calls):
             return None
@@ -401,23 +503,267 @@ def _int(v) -> int | None:
         return None
 
 
-def _read_coverage(calls: list[Call]) -> dict[str, tuple[bool, str]]:
-    """file path -> (read in full?, what was read)."""
+# Reads done with shell commands. What the agent sees is the output of the last
+# stage of a pipeline, so a file counts as read in full only through a `cat` (or
+# `nl`) at the end of its pipeline, or a `head` / `sed -n` range of at least
+# _LARGE_RANGE lines that printed fewer lines than it asked for (the file ended
+# first). A read piped into anything but `head`, written to a file, or whose
+# output Claude Code cut short counts as a read of an unknown part.
+
+_PART = 0  # end of a read whose extent is unknown: recorded as (1, _PART), never full
+_LARGE_RANGE = 500
+_PERSISTED = re.compile(r"<persisted-output>|Output too large \(|\[\d+ (?:characters|lines) truncated\]")
+_SED_SCRIPT = re.compile(r"^(\d+)(?:,(\d+|\$))?p$")
+_REDIR = re.compile(r"^(\d*|&)(>>|>|<)(.*)$")
+_PASS_THROUGH = frozenset("cat tee less more".split())
+_UNKNOWN_FILE = re.compile(r"[*?\[$`{]")  # a glob or a variable: which file it names is not known
+_READ_WRAPPERS = frozenset("sudo command env nice nohup stdbuf ionice exec builtin".split())
+
+
+def _pipelines(command: str) -> list[list[str]]:
+    """The pipelines of a command, each a list of its stages, split outside quotes."""
+    command = _HEREDOC.sub(" HEREDOC", command)
+    command = _MULTILINE_QUOTE.sub(" QUOTED ", command)
+    out: list[list[str]] = []
+    stages: list[str] = []
+    cur: list[str] = []
+    quote, i, n = "", 0, len(command)
+
+    def end_stage() -> None:
+        stages.append("".join(cur).strip())
+        cur.clear()
+
+    while i < n:
+        ch = command[i]
+        if quote:
+            if ch == "\\" and quote == '"' and i + 1 < n:
+                cur.append(command[i : i + 2])
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            cur.append(ch)
+        elif ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif ch == "|" and command[i + 1 : i + 2] != "|":
+            end_stage()
+            if command[i + 1 : i + 2] == "&":
+                i += 1
+        elif ch in ";\n" or command[i : i + 2] in ("&&", "||") or (
+            ch == "&" and command[i - 1 : i] not in ("<", ">") and command[i + 1 : i + 2] != ">"
+        ):
+            end_stage()
+            out.append([s for s in stages if s])
+            stages = []
+            if command[i : i + 2] in ("&&", "||"):
+                i += 1
+        else:
+            cur.append(ch)
+        i += 1
+    end_stage()
+    out.append([s for s in stages if s])
+    return [p for p in out if p]
+
+
+def _words(stage: str) -> list[str]:
+    try:
+        return shlex.split(stage)
+    except ValueError:
+        return stage.split()
+
+
+def _args(words: list[str]) -> tuple[list[str], bool]:
+    """Words without redirections and the program's wrappers; and whether stdout goes to a file."""
+    out: list[str] = []
+    to_file = False
+    i = 0
+    while i < len(words):
+        m = _REDIR.match(words[i])
+        if m:
+            fd, op, target = m.groups()
+            if not target and i + 1 < len(words):
+                target = words[i + 1]
+                i += 1
+            if op != "<" and fd in ("", "1", "&") and not target.startswith("&"):
+                to_file = True
+            i += 1
+            continue
+        out.append(words[i])
+        i += 1
+    while out and (out[0] in _READ_WRAPPERS or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", out[0])):
+        out.pop(0)
+    return out, to_file
+
+
+def _count_arg(w: str) -> int | None:
+    v = _int(w)
+    return v if v is not None and v > 0 else None
+
+
+def _stage_reads(args: list[str]) -> list[tuple[str, int, int]]:
+    """(file, first line, last line) for a stage that prints files: cat, nl, head, tail, sed -n."""
+    if not args:
+        return []
+    prog, rest = os.path.basename(args[0]), args[1:]
+    if prog in ("cat", "nl"):
+        return [(f, 1, _WHOLE) for f in rest if f and not f.startswith("-") and f not in ("HEREDOC", "QUOTED")
+                and not _UNKNOWN_FILE.search(f)]
+    if prog in ("head", "tail"):
+        count: int | None = 10
+        start_at: int | None = None
+        partial = False
+        files: list[str] = []
+        j = 0
+        while j < len(rest):
+            w = rest[j]
+            if w in ("-n", "--lines") and j + 1 < len(rest):
+                v = rest[j + 1]
+                j += 2
+            elif w.startswith("--lines="):
+                v, j = w[8:], j + 1
+            elif re.fullmatch(r"-n[+-]?\d+", w):
+                v, j = w[2:], j + 1
+            elif re.fullmatch(r"-\d+", w):
+                v, j = w[1:], j + 1
+            elif re.fullmatch(r"\+\d+", w) and prog == "tail":
+                v, j = w, j + 1
+            else:
+                if w in ("-c", "--bytes"):
+                    partial, j = True, j + 2
+                    continue
+                if w.startswith("-c") or w.startswith("--bytes"):
+                    partial = True
+                elif not w.startswith("-"):
+                    files.append(w)
+                j += 1
+                continue
+            if prog == "tail" and v.startswith("+"):
+                start_at = _count_arg(v[1:])
+            else:
+                count = _count_arg(v)
+        if prog == "tail":
+            if start_at is None or partial:
+                return [(f, 1, _PART) for f in files]
+            return [(f, start_at, _WHOLE) for f in files]
+        if partial or count is None:
+            return [(f, 1, _PART) for f in files]
+        return [(f, 1, count) for f in files]
+    if prog == "sed" and "-n" in rest:
+        plain = [w for w in rest if not w.startswith("-")]
+        if len(plain) < 2:
+            return []
+        ranges = []
+        for part in plain[0].split(";"):
+            m = _SED_SCRIPT.match(part.strip())
+            if not m:
+                return []  # a script that does more than print line ranges
+            a = int(m.group(1))
+            b = _WHOLE if m.group(2) == "$" else int(m.group(2)) if m.group(2) else a
+            ranges.append((a, b))
+        return [(f, a, b) for f in plain[1:] for a, b in ranges]
+    return []
+
+
+def _head_limit(args: list[str]) -> int | None:
+    """The line count of a `head` stage reading its input, or None if it is not one."""
+    if not args or os.path.basename(args[0]) != "head":
+        return None
+    reads = _stage_reads(args + ["STDIN"])
+    return reads[-1][2] if reads else None
+
+
+def _norm(path: str, cwd: str) -> str:
+    if path.startswith("/"):
+        return os.path.normpath(path)
+    if cwd:
+        return os.path.normpath(os.path.join(cwd, path))
+    return os.path.normpath(path)
+
+
+def _comps(path: str) -> list[str]:
+    return [c for c in path.split("/") if c not in ("", ".")]
+
+
+def _bash_reads(call: Call) -> list[tuple[str, int, int]]:
+    """(resolved file, first line, last line) for the files a Bash call printed."""
+    out: list[tuple[str, int, int]] = []
+    cwd = call.cwd
+    last_stage_reads = 0
+    for stages in _pipelines(call.command):
+        parsed = [_args(_words(s)) for s in stages]
+        first = parsed[0][0]
+        if len(stages) == 1 and first and first[0] == "cd":
+            target = first[1] if len(first) > 1 else ""
+            if target and not target.startswith(("~", "$", "-")):
+                cwd = _norm(target, cwd)
+            continue
+        for idx, (args, to_file) in enumerate(parsed):
+            reads = _stage_reads(args)
+            if not reads or to_file:
+                continue
+            for nxt, nxt_to_file in parsed[idx + 1 :]:
+                if nxt_to_file:
+                    reads = []
+                    break
+                limit = _head_limit(nxt)
+                if limit is not None:
+                    reads = [(f, a, b if b == _PART else min(b, a + limit - 1)) for f, a, b in reads]
+                    continue
+                if nxt and os.path.basename(nxt[0]) in _PASS_THROUGH:
+                    continue
+                reads = [(f, 1, _PART) for f, _, _ in reads]
+                break
+            out.extend((_norm(f, cwd), a, b) for f, a, b in reads if not _UNKNOWN_FILE.search(f))
+            last_stage_reads += len(reads)
+    text = call.result_text or ""
+    if _PERSISTED.search(text):
+        return [(f, 1, _PART) for f, _, _ in out]
+    if len(out) == 1:
+        f, a, b = out[0]
+        printed = len(text.rstrip("\n").splitlines()) if text.strip() else 0
+        if b not in (_WHOLE, _PART) and b - a + 1 >= _LARGE_RANGE and printed < b - a + 1:
+            out = [(f, a, _WHOLE)]  # the file ended before the range did
+    return out
+
+
+def _coverage(session: list[Call], turn: list[Call]) -> tuple[dict[str, tuple[bool, str]], set[str]]:
+    """file -> (read in full in the session?, what was read), and the files read in this turn.
+
+    Files are keyed by resolved path. A relative path (no working directory recorded)
+    is merged into the one absolute path it is a suffix of; files that only share a
+    base name are kept apart.
+    """
+    turn_ids = {id(c) for c in turn}
     ranges: dict[str, list[tuple[int, int]]] = {}
     totals: dict[str, int] = {}
-    for c in calls:
-        if c.name != "Read" or c.is_error:
+    touched: set[str] = set()
+
+    def add(key: str, a: int, b: int, c: Call) -> None:
+        ranges.setdefault(key, []).append((a, b))
+        if id(c) in turn_ids:
+            touched.add(key)
+
+    for c in session:
+        if c.is_error:
+            continue
+        if c.name == "Bash":
+            for f, a, b in _bash_reads(c):
+                add(f, a, b, c)
+            continue
+        if c.name != "Read":
             continue
         path = c.input.get("file_path")
         if not isinstance(path, str):
             continue
+        key = _norm(path, c.cwd)
         meta = c.result_meta.get("file") if isinstance(c.result_meta, dict) else None
         total = _int(meta.get("totalLines")) if isinstance(meta, dict) else None
         if total is not None:
             start = _int(meta.get("startLine")) or 1
             num = _int(meta.get("numLines")) or 0
-            totals[path] = total
-            ranges.setdefault(path, []).append((start, start + num - 1))
+            totals[key] = total
+            add(key, start, start + num - 1, c)
             continue
         # No result metadata: judge from the call's own offset and limit.
         offset = _int(c.input.get("offset"))
@@ -425,43 +771,127 @@ def _read_coverage(calls: list[Call]) -> dict[str, tuple[bool, str]]:
         from_top = offset in (None, 0, 1)
         returned = len(re.findall(r"^\s*\d+\t", c.result_text or "", re.MULTILINE))
         if from_top and (limit is None or (c.result_text is not None and returned < limit)):
-            ranges.setdefault(path, []).append((1, _WHOLE))  # no limit, or the file ended first
+            add(key, 1, _WHOLE, c)  # no limit, or the file ended first
             continue
         start = offset if offset and offset > 0 else 1
-        ranges.setdefault(path, []).append((start, start + (limit or returned or 1) - 1))
+        add(key, start, start + (limit or returned or 1) - 1, c)
+    absolute = [k for k in ranges if k.startswith("/")]
+    for k in [k for k in ranges if not k.startswith("/")]:
+        comps = _comps(k)
+        cands = [p for p in absolute if comps and _comps(p)[-len(comps):] == comps]
+        if len(cands) == 1:
+            ranges[cands[0]].extend(ranges.pop(k))
+            if k in touched:
+                touched.discard(k)
+                touched.add(cands[0])
     out: dict[str, tuple[bool, str]] = {}
     for path, rs in ranges.items():
         rs.sort()
         covered_to, gaps = 0, False
         for a, b in rs:
+            if b == _PART:
+                continue
             gaps = gaps or a > covered_to + 1
             covered_to = max(covered_to, b)
         total = totals.get(path)
+        parts = []
+        for a, b in rs:
+            if b == _PART:
+                parts.append("an unknown part (filtered or cut-off output)")
+            else:
+                parts.append(f"lines {a}-{min(b, total) if total else b}")
         if total is not None:
-            full = not gaps and covered_to >= total
-            desc = "lines " + ", ".join(f"{a}-{min(b, total)}" for a, b in rs) + f" of {total}"
+            full = covered_to > 0 and not gaps and covered_to >= total
+            desc = ", ".join(parts) + f" of {total}"
         else:
-            full = not gaps and covered_to >= _WHOLE
-            desc = "the whole file" if full else "lines " + ", ".join(f"{a}-{b}" for a, b in rs)
-        out[path] = (full, desc)
-    return out
+            full = covered_to > 0 and not gaps and covered_to >= _WHOLE
+            desc = "the whole file" if full else ", ".join(parts)
+        out[path] = (full, desc.replace(f"-{_WHOLE}", "-end"))
+    return out, touched
 
 
-def _scope_problem(sentence: str, calls: list[Call]) -> str | None:
-    cov = _read_coverage(calls)
-    if not cov:
-        return None  # no Read calls this turn: nothing to compare against
-    low = sentence.lower()
-    named = [p for p in cov if os.path.basename(p).lower() in low]
-    if named:
-        for p in named:
-            if not cov[p][0]:
-                return f"the Read calls on {os.path.basename(p)} in this turn covered {cov[p][1]}"
+def _read_coverage(calls: list[Call]) -> dict[str, tuple[bool, str]]:
+    return _coverage(calls, calls)[0]
+
+
+def _matching(token: str, cov: dict[str, tuple[bool, str]]) -> list[str]:
+    """Files read in the session whose path ends with the named path, component by component."""
+    comps = _comps(token)
+    return [k for k in cov if comps and _comps(k)[-len(comps):] == comps]
+
+
+def _scope_problem(sentence: str, m: re.Match, cov: dict[str, tuple[bool, str]], touched: set[str]) -> str | None:
+    """Reads anywhere in the session count: a file read in two turns is read."""
+    named, unread = [], []
+    for t in _FILE_NAME.finditer(sentence):
+        keys = _matching(t.group(0), cov)
+        if keys:
+            named.append((t.group(0), keys))
+        elif t.start() < m.end() + 15 and t.end() > m.start():
+            unread.append(t.group(0))  # the claim's own object, never read
+    for name, keys in named:
+        if not any(cov[k][0] for k in keys):
+            return f"the reads of {name} in this session covered {cov[keys[0]][1]}"
+    if unread:
+        return f"{unread[0]} was not read in this session (by a Read, or by cat, head, tail or sed -n)"
+    if named or not cov:
         return None
+    if touched:
+        if any(cov[k][0] for k in touched):
+            return None  # a file read this turn was read in full; the claim may be about that one
+        k = sorted(touched)[0]
+        return f"no file read in this turn was read in full in this session ({os.path.basename(k)}: {cov[k][1]})"
     if any(full for full, _ in cov.values()):
-        return None  # some file was read in full; the claim may be about that one
-    p, (_, desc) = next(iter(cov.items()))
-    return f"no file was read in full in this turn ({os.path.basename(p)}: {desc})"
+        return None
+    k = next(iter(cov))
+    return f"no file read in this session was read in full ({os.path.basename(k)}: {cov[k][1]})"
+
+
+def _contains(seq: list[str], sub: list[str]) -> bool:
+    return any(seq[i : i + len(sub)] == sub for i in range(len(seq) - len(sub) + 1))
+
+
+_NOT_DIRS = frozenset("it this that them those these the all everything whole entire full complete".split())
+
+
+def _dir_problem(m: re.Match, cov: dict[str, tuple[bool, str]], spans: list[str]) -> str | None:
+    d = m.group("d")
+    cited = re.fullmatch(r"CMD(\d+)", d)
+    if cited and int(cited.group(1)) < len(spans):
+        d = spans[int(cited.group(1))].strip()
+    comps = _comps(d.strip("/"))
+    if not comps or d.lower() in _NOT_DIRS:
+        return None
+    under = [k for k in cov if _contains(_comps(k)[:-1], comps)]
+    part = [k for k in under if not cov[k][0]]
+    if not part:
+        return None  # not a directory read in this session, or every file read under it was read in full
+    k = part[0]
+    return (f"{len(part)} of the {len(under)} files read under {d} in this session were read only in part "
+            f"({os.path.basename(k)}: {cov[k][1]})")
+
+
+_GENERIC_DOCS = frozenset("file document doc page line section chapter part item paper note slide".split())
+
+
+def _count_problem(m: re.Match, cov: dict[str, tuple[bool, str]]) -> str | None:
+    word = m.group("n").lower()
+    n = int(word) if word.isdigit() else _NUMBERS[word]
+    noun = m.group("noun").lower()
+    if noun.endswith("ie"):
+        noun = noun[:-2] + "y"
+    if noun in _GENERIC_DOCS:
+        return None
+    variants = {noun, noun.replace("-", "_"), noun.replace("-", "")}
+    matching = [k for k in cov if any(v in os.path.basename(k).lower() for v in variants)]
+    if len(matching) < n:
+        return None  # fewer files are named like these documents than the claim counts: names do not identify them
+    full = [k for k in matching if cov[k][0]]
+    if len(full) >= n:
+        return None
+    names = ", ".join(os.path.basename(k) for k in full) or "none"
+    return (f"{len(full)} file(s) named like '{noun}' were read in full in this session ({names}), "
+            f"of {len(matching)} read at all; the claim is {n}")
 
 
 # --------------------------------------------------------------------------
@@ -586,11 +1016,12 @@ def _sentences(prose: str) -> list[str]:
     return [s for s in re.split(r"(?<=[.!?;])\s+|\n+", prose) if s.strip()]
 
 
-def find_problems(text: str, calls: list[Call]) -> list[tuple[str, str]]:
+def find_problems(text: str, calls: list[Call], session: list[Call] | None = None) -> list[tuple[str, str]]:
     """(claim as written, what the turn lacks) for each unsupported claim."""
     prose, spans = _prepare(text)
     problems: list[tuple[str, str]] = []
     checked: set[str] = set()
+    cov, touched = _coverage(session if session is not None else calls, calls)
     for sentence in _sentences(prose):
         if sentence.rstrip().endswith("?") or _HEDGE.search(sentence):
             continue
@@ -598,7 +1029,7 @@ def find_problems(text: str, calls: list[Call]) -> list[tuple[str, str]]:
             if kind in checked:
                 continue
             for m in pattern.finditer(sentence):
-                if _NEGATED_BEFORE.search(sentence[: m.start()]):
+                if _NEGATED_BEFORE.search(sentence[: m.start()]) or _GENERIC_AFTER.match(sentence[m.end():]):
                     continue
                 checked.add(kind)
                 gap = _support(kind, calls, spans)
@@ -608,9 +1039,23 @@ def find_problems(text: str, calls: list[Call]) -> list[tuple[str, str]]:
         for m in _SCOPE_CLAIM.finditer(sentence):
             if _NEGATED_BEFORE.search(sentence[: m.start()]):
                 continue
-            gap = _scope_problem(sentence, calls)
+            gap = _scope_problem(sentence, m, cov, touched)
             if gap:
                 problems.append((m.group(0).strip(), gap))
+            break
+        for pattern, judge in ((_DIR_CLAIM, lambda m: _dir_problem(m, cov, spans)),
+                               (_COUNT_CLAIM, lambda m: _count_problem(m, cov))):
+            for m in pattern.finditer(sentence):
+                if _NEGATED_BEFORE.search(sentence[: m.start()]):
+                    continue
+                gap = judge(m)
+                if gap:
+                    problems.append((m.group(0).strip(), gap))
+                    break
+        for m in _REPO_CLAIM.finditer(sentence):
+            if _NEGATED_BEFORE.search(sentence[: m.start()]):
+                continue
+            problems.append((m.group(0).strip(), "reads cannot be shown to cover a whole repository; name the files or directories that were read"))
             break
         for m in _CITED_CLAIM.finditer(sentence):
             if _NEGATED_BEFORE.search(sentence[: m.start()]):
@@ -645,13 +1090,18 @@ def main() -> int:
         transcript = _resolve_transcript(data)
         if transcript is None:
             return 0  # can't see the turn -> fail open
-        turn = _turn_events(_load_events(transcript))
+        events = _load_events(transcript)
+        turn = _turn_events(events)
         text = data.get("last_assistant_message")
         if not isinstance(text, str) or not text.strip():
             text = _final_text_from_transcript(turn)
         if not text.strip():
             return 0
-        problems = find_problems(text, _turn_calls(turn))
+        session = _turn_calls(events)
+        # The turn is a suffix of the session, so its calls are the session's last ones
+        # (the same objects, which _coverage relies on to tell this turn's reads apart).
+        n_turn = len(_turn_calls(turn))
+        problems = find_problems(text, session[len(session) - n_turn:] if n_turn else [], session)
         if problems:
             print(json.dumps({"decision": "block", "reason": _reason(problems)}))
     except Exception:  # fail open on anything unexpected

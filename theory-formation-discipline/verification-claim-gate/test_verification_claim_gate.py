@@ -10,12 +10,14 @@ checks whether it blocks or passes. Exit 0 = all green, exit 1 = a case regresse
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-HOOK = Path(__file__).resolve().parent / "verification_claim_gate.py"
+# CLAIM_GATE lets the same cases run against another copy of the gate (an older version).
+HOOK = Path(os.environ.get("CLAIM_GATE") or Path(__file__).resolve().parent / "verification_claim_gate.py")
 
 
 def _run(events: list[dict], stop_hook_active: bool = False, extra: dict | None = None) -> bool:
@@ -373,6 +375,223 @@ EXTRA = [
 ]
 
 
+EXTRA += [
+    (
+        "S-1 whole-file claim; file read in two turns of the session -> silent",
+        [_prompt("start on parser.rs"), *_read("/w/src/parser.rs", total=300, limit=200), _asst_text("Read the first part."),
+         _prompt("go on"), *_read("/w/src/parser.rs", total=300, offset=201, limit=200),
+         _asst_text("I read parser.rs in full and found nothing wrong.")],
+        False, None, False,
+    ),
+    (
+        "S-2 whole-file claim; earlier turn and this turn together still leave a gap -> fires",
+        [_prompt("start on parser.rs"), *_read("/w/src/parser.rs", total=900, limit=200), _asst_text("Read the first part."),
+         _prompt("go on"), *_read("/w/src/parser.rs", total=900, offset=201, limit=200),
+         _asst_text("I read parser.rs in full and found nothing wrong.")],
+        False, None, True,
+    ),
+    (
+        "S-3 whole-file claim after `sed -n 1,80p` on the file -> fires",
+        [_prompt("review notes.md"), *_bash("sed -n 1,80p docs/notes.md", "line"),
+         _asst_text("I read notes.md in full. It is consistent.")],
+        False, None, True,
+    ),
+    (
+        "S-4 whole-file claim after `cat` on the file -> silent",
+        [_prompt("review notes.md"), *_bash("cat docs/notes.md", "line"),
+         _asst_text("I read notes.md in full. It is consistent.")],
+        False, None, False,
+    ),
+    (
+        "S-5 whole-file claim after only `cat file | head -30` -> fires",
+        [_prompt("review notes.md"), *_bash("cat docs/notes.md | head -30", "line"),
+         _asst_text("I read notes.md in full. It is consistent.")],
+        False, None, True,
+    ),
+    (
+        "S-5b whole-file claim after `cat file | head -30` and `head -30 file` -> fires",
+        [_prompt("review notes.md"), *_bash("cat docs/notes.md | head -30", "line"), *_bash("head -30 docs/notes.md", "line"),
+         _asst_text("I read notes.md in full. It is consistent.")],
+        False, None, True,
+    ),
+    (
+        "S-6 'read through the whole repository' -> fires",
+        [_prompt("look at the repo"), *_bash("ls src && sed -n 1,40p src/lib.rs", "x"),
+         _asst_text("I read through the whole repository. The design is sound.")],
+        False, None, True,
+    ),
+    (
+        "S-7 'I read the README and src/lib.rs' (names what was read) -> silent",
+        [_prompt("look at the repo"), *_bash("cat README.md", "x"),
+         _asst_text("I read the README and the top of src/lib.rs. The design looks sound so far.")],
+        False, None, False,
+    ),
+    (
+        "P-1 '3x faster' with no timing command in the turn -> fires",
+        [_prompt("speed up the parser"), *_edit("/w/src/parser.rs"), *_bash("cargo build --release", "Finished"),
+         _asst_text("The parser is now 3x faster on large inputs.")],
+        False, None, True,
+    ),
+    (
+        "P-2 '3x faster' after hyperfine ran -> silent",
+        [_prompt("speed up the parser"), *_bash("hyperfine './target/release/p big.txt'", "Time (mean): 1.2 s"),
+         *_edit("/w/src/parser.rs"), *_bash("hyperfine './target/release/p big.txt'", "Time (mean): 0.4 s"),
+         _asst_text("The parser is now 3x faster on big.txt: 1.2 s before, 0.4 s after.")],
+        False, None, False,
+    ),
+    (
+        "P-3 'should be faster' (no number) -> silent",
+        [_prompt("speed up the parser"), *_edit("/w/src/parser.rs"),
+         _asst_text("This should be faster, but I have not measured it.")],
+        False, None, False,
+    ),
+    (
+        "P-4 'reduced memory usage by 40%' after `time` on an unrelated failing command only -> fires",
+        [_prompt("cut memory"), *_edit("/w/src/a.rs"), *_bash("time ./run", "boom", exit_code=1),
+         _asst_text("I reduced memory usage by 40%.")],
+        False, None, True,
+    ),
+]
+
+def _bash_at(cmd: str, output: str, cwd: str, exit_code: int = 0) -> list[dict]:
+    """A Bash call whose transcript records carry the session's working directory."""
+    events = _bash(cmd, output, exit_code)
+    for e in events:
+        e["cwd"] = cwd
+    return events
+
+
+PERSISTED = ("<persisted-output>\nOutput too large (45.2KB). Full output saved to: /tmp/x/tool-results/b1.txt\n\n"
+             "Preview (first 2KB):\nline 1\nline 2\n</persisted-output>")
+
+# Cases written from the defects found in review of the second revision. Each defect
+# case failed against the gate before its fix; the cases marked "guard" in the README
+# already passed and are there so the fix does not overshoot.
+FIXES = [
+    ("G-1b `cat data.json | head -5` only, claim data.json in full -> fires",
+     [_prompt("review"), *_bash("cat data.json | head -5", "{"), _asst_text("I read data.json in full.")], True),
+    ("G-1c `cat -n FILE` is a whole read -> silent",
+     [_prompt("review"), *_bash("cat -n docs/notes.md", "     1\tline"), _asst_text("I read notes.md in full.")], False),
+    ("G-1d `cat a.md b.md` reads both files -> silent",
+     [_prompt("review"), *_bash("cat docs/a.md docs/b.md", "x\ny"), _asst_text("I read b.md in full.")], False),
+    ("G-1e `cat` inside a heredoc script body is not a read -> fires",
+     [_prompt("review"), *_bash("python3 - <<'EOF'\nimport os\nos.system('cat notes.md')\nEOF", "x"),
+      _asst_text("I read notes.md in full.")], True),
+    ("G-1f `cat FILE > copy` shows nothing, so it is not a read -> fires",
+     [_prompt("review"), *_bash("cat docs/notes.md > /tmp/copy.md", ""), _asst_text("I read notes.md in full.")], True),
+    ("G-2a a/config.py read in full does not cover a claim about b/config.py -> fires",
+     [_prompt("review"), *_read("/w/a/config.py", total=50), *_bash_at("sed -n 1,50p b/config.py", "x", "/w"),
+      _asst_text("I read b/config.py in full.")], True),
+    ("G-2b relative sed range resolved against cwd adds to an absolute Read -> silent",
+     [_prompt("review"), *_read("/w/docs/notes.md", total=200, limit=100),
+      *_bash_at("sed -n 101,200p docs/notes.md", "x", "/w"), _asst_text("I read docs/notes.md in full.")], False),
+    ("G-2c same without a recorded cwd: matched on the shared path suffix -> silent",
+     [_prompt("review"), *_read("/w/docs/notes.md", total=200, limit=100),
+      *_bash("sed -n 101,200p docs/notes.md", "x"), _asst_text("I read docs/notes.md in full.")], False),
+    ("G-2d bare name, two same-named files, one read in full -> silent (ambiguous, lenient)",
+     [_prompt("review"), *_read("/w/a/config.py", total=50), *_read("/w/b/config.py", total=100, limit=10),
+      _asst_text("I read config.py in full.")], False),
+    ("G-2e claim names b/config.py, only a/config.py was read -> fires",
+     [_prompt("review"), *_read("/w/a/config.py", total=50), _asst_text("I read b/config.py in full.")], True),
+    ("G-3 a.py read in part, data.py in full; claim about data.py -> silent",
+     [_prompt("review"), *_read("/w/a.py", total=100, limit=10), *_read("/w/data.py", total=40),
+      _asst_text("I read data.py in full.")], False),
+    ("G-4a 'the entire project brief' is not a repository claim -> silent",
+     [_prompt("plan"), *_read("/w/brief.md", total=40), _asst_text("I read the entire project brief before starting.")],
+     False),
+    ("G-4b 'the entire repository before starting' -> fires",
+     [_prompt("plan"), *_read("/w/brief.md", total=40), _asst_text("I read the entire repository before starting.")],
+     True),
+    ("G-5a '3x faster' with only `ls benchmarks/` -> fires",
+     [_prompt("speed"), *_edit("/w/a.rs"), *_bash("ls benchmarks/", "a.rs"), _asst_text("The parser is now 3x faster.")],
+     True),
+    ("G-5b '3x faster' with only `grep -n time src/a.rs` -> fires",
+     [_prompt("speed"), *_edit("/w/a.rs"), *_bash("grep -n time src/a.rs", "1:x"),
+      _asst_text("The parser is now 3x faster.")], True),
+    ("G-5c '3x faster' after `./bench.sh` -> silent",
+     [_prompt("speed"), *_bash("./bench.sh", "1.2 s"), *_edit("/w/a.rs"), *_bash("./bench.sh", "0.4 s"),
+      _asst_text("The parser is now 3x faster.")], False),
+    ("G-5d '3x faster' after `/usr/bin/time -v` -> silent",
+     [_prompt("speed"), *_bash("/usr/bin/time -v ./target/release/p big.txt", "Elapsed: 0.4"),
+      _asst_text("The parser is now 3x faster.")], False),
+    ("G-5e '3x faster' after `python3 benchmarks/run_bench.py` -> silent",
+     [_prompt("speed"), *_bash("python3 benchmarks/run_bench.py", "0.4 s"), _asst_text("The parser is now 3x faster.")],
+     False),
+    ("G-5f '3x faster' after `cd build && time make` -> silent",
+     [_prompt("speed"), *_bash("cd build && time make", "real 0m4.1s"), _asst_text("The build is now 3x faster.")],
+     False),
+    ("G-6 `cat` whose output Claude Code persisted as too large -> fires",
+     [_prompt("review"), *_bash("cat big.log", PERSISTED), _asst_text("I read big.log in full.")], True),
+    ("G-7 `head -n 5000` that printed fewer lines than asked showed the whole file -> silent",
+     [_prompt("review"), *_bash("head -n 5000 small.py", "a\nb\nc"), _asst_text("I read small.py in full.")], False),
+    ("G-7b `head -n 3` that printed exactly 3 lines may have stopped early -> fires",
+     [_prompt("review"), *_bash("head -n 3 small.py", "a\nb\nc"), _asst_text("I read small.py in full.")], True),
+    ("G-7c `sed -n 1,500p` that printed fewer lines than asked -> silent",
+     [_prompt("review"), *_bash("sed -n 1,500p small.py", "a\nb\nc"), _asst_text("I read small.py in full.")], False),
+    ("G-8a a run time stated as background, no tool calls -> silent",
+     [_prompt("how long?"), _asst_text("On the workstation the full training run completes in 40 minutes.")], False),
+    ("G-8b 'now runs in 1.2 s' with no timing command -> fires",
+     [_prompt("speed"), *_edit("/w/a.rs"), _asst_text("The parser now runs in 1.2 s.")], True),
+    ("G-8c 'dropped from 900 ms to 300 ms' with no timing command -> fires",
+     [_prompt("speed"), *_edit("/w/a.rs"), _asst_text("Startup dropped from 900 ms to 300 ms.")], True),
+    ("G-9 claim names a file never read; another file was read in full -> fires",
+     [_prompt("review"), *_read("/w/other.py", total=40), _asst_text("I read the whole config.toml.")], True),
+    ("G-9b a second file mentioned after the claim is not its object -> silent",
+     [_prompt("review"), *_read("/w/parser.rs", total=40), _asst_text("I read parser.rs in full, and it imports lexer.rs.")],
+     False),
+    ("G-11 a general statement about tests ('all pass means ...') -> silent",
+     [_prompt("how does the benchmark score?"),
+      _asst_text("Each task comes with a set of tests the model never sees ... all pass means the task counts as "
+                 "solved, otherwise it doesn't.")], False),
+    ("G-12a 'I've read through <dir>' after partial reads under it -> fires",
+     [_prompt("look at it"), *_read("/w/widget-core/README.md", total=40),
+      *_read("/w/widget-core/docs/plan.md", total=900, limit=200),
+      _asst_text("I've read through widget-core. Here's what I took from it.")], True),
+    ("G-12b 'I've read through <dir>' when every read under it was whole -> silent",
+     [_prompt("look at it"), *_read("/w/widget-core/README.md", total=40), *_read("/w/widget-core/docs/plan.md", total=90),
+      _asst_text("I've read through widget-core. Here's what I took from it.")], False),
+    ("G-12c 'read through the paper' (not a directory read in the session) -> silent",
+     [_prompt("look at it"), *_read("/w/docs/plan.md", total=900, limit=200),
+      _asst_text("I read through the paper and the notes.")], False),
+    ("G-13a 'I read all four handoffs'; three read in full, one in part -> fires",
+     [_prompt("synthesise"), *_read("/w/h/a_handoff.md", total=40), *_read("/w/h/b_handoff.md", total=40),
+      *_read("/w/h/c_handoff.md", total=40), *_read("/w/h/d_handoff.md", total=229, limit=60),
+      _asst_text("I read all four handoffs and wrote the synthesis.")], True),
+    ("G-13b four handoffs read in full across two turns, one by sed -> silent",
+     [_prompt("start"), *_read("/w/h/a_handoff.md", total=40), *_bash_at("sed -n 1,1000p h/b_handoff.md", "x", "/w"),
+      _asst_text("Read two."), _prompt("go on"), *_read("/w/h/c_handoff.md", total=40),
+      *_read("/w/h/d_handoff.md", total=229), _asst_text("I read all four handoffs and wrote the synthesis.")], False),
+    ("G-13d 'all four handoffs', only two files have 'handoff' in their names, all four read in full -> silent "
+     "(from the replay: names do not identify the documents, so the count is not judged)",
+     [_prompt("synthesise"), *_read("/w/h/a_handoff.md", total=40), *_read("/w/h/b_handoff.md", total=40),
+      *_read("/w/h/context.md", total=40), *_read("/w/h/sequence.md", total=40),
+      _asst_text("I read all four handoffs and wrote the synthesis.")], False),
+    ("G-13c 'I read all four papers' when no file matches 'paper' -> silent",
+     [_prompt("synthesise"), *_read("/w/h/a_handoff.md", total=40), _asst_text("I read all four papers.")], False),
+]
+
+# (name, events, text the pause reason must contain, text it must not contain)
+REASON_CASES = [
+    ("G-10 scope gap computed over the session says 'in this session'",
+     [_prompt("review"), *_read("/w/src/parser.rs", total=850, limit=200), _asst_text("I read the whole file.")],
+     "in this session", "read in this turn has been read in full"),
+]
+
+
+def _reason_of(events: list[dict]) -> str:
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        for e in events:
+            f.write(json.dumps(e) + "\n")
+        tp = f.name
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps({"transcript_path": tp}),
+                       capture_output=True, text=True)
+    Path(tp).unlink(missing_ok=True)
+    try:
+        return json.loads(r.stdout).get("reason", "") if r.stdout.strip() else ""
+    except (json.JSONDecodeError, ValueError):
+        return ""
+
+
 def _fail_open(stdin: str) -> bool:
     r = subprocess.run([sys.executable, str(HOOK)], input=stdin, capture_output=True, text=True)
     return r.returncode == 0 and not r.stdout.strip() and not r.stderr.strip()
@@ -399,10 +618,17 @@ def main() -> int:
     if not fail_open_ok:
         failures += 1
 
-    for name, events, active, extra, want in ACCEPTANCE + EXTRA:
+    for name, events, active, extra, want in ACCEPTANCE + EXTRA + [(n, e, False, None, w) for n, e, w in FIXES]:
         got = _run(events, stop_hook_active=active, extra=extra)
         ok = got == want
         print(f"[{'PASS' if ok else 'FAIL'}] {name}  (want block={want}, got block={got})")
+        if not ok:
+            failures += 1
+
+    for name, events, want_in, want_out in REASON_CASES:
+        reason = _reason_of(events)
+        ok = want_in in reason and want_out not in reason
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}  (reason: {(reason.splitlines() or [''])[min(1, len(reason.splitlines()) - 1)] if reason else ''!r})")
         if not ok:
             failures += 1
 

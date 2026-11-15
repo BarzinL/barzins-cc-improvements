@@ -1,0 +1,26 @@
+{
+  "min_prompt_chars": 40,
+  "categories": [
+    {
+      "id": "performance",
+      "pattern": "\\b(optimi[sz](?:e|es|ed|ing|ation|ations|er)\\b|speed(?:s|ing)? ?up|(?:run|runs|running|go|goes|load|loads|build|builds|be|is|it|much|lot|bit) faster|faster than|(?:too|very|really|so|painfully) slow\\b|slow(?:er|ness|downs?)\\b|slow (?:query|queries|endpoint|build|startup|tests?|loop|import)|latency|throughput|profil(?:ing|er)\\b|profile (?:it|this|the (?:code|program|binary|function|loop|query|endpoint))|flame ?graphs?|benchmark\\w*|bottleneck\\w*|memory (?:use|usage|footprint|leak)|hot ?path)",
+      "directive": "Performance work. Before changing anything, measure with a command you can rerun, and keep its output. After the change, rerun the same command on the same input. Report both numbers and the command. Make no speed or memory claim without both measurements."
+    },
+    {
+      "id": "visual",
+      "pattern": "\\b(screenshots?|mock-?ups?|wireframes?|(?:page|screen|ui|css|grid|flex(?:box)?|chart|axis) layout|layout (?:is|looks)|renderer|render(?:ed|ing|s)? (?:the |it |this |an? )?(?:image|page|scene|frame|svg|pdf|png|diagram|chart|plot|figure|html|output|to (?:an? )?(?:image|png|pdf|svg))|diagrams?|(?:bar|line|pie|scatter|area|gantt|flow) ?charts?|charting|chart (?:axis|axes|legend|labels?|colou?rs?|render\\w*)|plots?|plotting|matplotlib|plotly|css|svg|canvas|shaders?|figma|cad|gui|ui|pixels?|fonts?)\\b",
+      "directive": "Visual work. After producing output, render it to an image and look at the image before reporting. If a reference image or mockup was given, compare against it and say what differs. Do not describe how the output looks from the code alone."
+    },
+    {
+      "id": "scientific",
+      "pattern": "\\b(simulations?|numerical\\w*|(?:ode|pde|numerical|linear|nonlinear|eigen\\w*) solvers?|pde|ode|finite (?:element|difference|volume)|monte carlo|bayesian|(?:linear|logistic|polynomial|ridge|lasso|nonlinear|least[- ]squares|cox|poisson) regression|regression (?:model|coefficients?|analysis)|statistical(?:ly)? (?:tests?|significan\\w*|models?|power|analysis)|statistically|t-tests?|chi-squared?|anova|p-?values?|confidence intervals?|genom\\w+|bioinformatic\\w*|proteom\\w+|(?:dna|rna|protein|peptide|genome|genomic|amino acid|nucleotide) sequences?|sequencing|sequence alignment|molecul\\w+|thermodynamic\\w*|quantum|spectroscop\\w*|spectral|spectrum|fft|fourier|eigen\\w+|si units|units? (?:conversion|of measure)|dimensional analysis|pharmaco\\w+|epigenetic\\w*|methylation)\\b",
+      "directive": "Scientific or numerical work, where recalled domain facts are often wrong. Start your reply with one bold line saying this is domain work you will ground before coding. Then: look in the project reference ({reference}) for a relevant entry. If there is none, read primary sources first and add an entry with its source. Validate the code against a case with a known answer, and state units for every quantity."
+    },
+    {
+      "id": "multi-step",
+      "pattern": "\\b(end[- ]to[- ]end|phases?|milestones?|migrat\\w+|refactor\\w*|implement the plan|roadmap|step by step)\\b|(?:^|\\n)\\s*(?:[-*]|\\d+[.)])\\s+\\S.*(?:\\n\\s*(?:[-*]|\\d+[.)])\\s+\\S.*){2,}",
+      "directive": "Multi-step work. Write the steps as a Markdown checklist to plan.md in your scratchpad directory before starting, and tick each item when it is done. In the final report, account for every item: done, deferred with the reason, or dropped with the reason."
+    }
+  ],
+  "_note": "In a directive, {reference} is replaced by how to search the project reference: the check_reference.py the hook finds beside itself or in ../reference-store/, else docs/reference/INDEX.md."
+}
