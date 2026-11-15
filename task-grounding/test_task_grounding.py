@@ -158,6 +158,16 @@ def main() -> int:
         check("hook installed with no checker nearby -> directive points at INDEX.md, names no checker",
               "Scientific" in ctx and "--find" not in ctx and "docs/reference/INDEX.md" in ctx)
 
+    with tempfile.TemporaryDirectory() as d:
+        paste = '<pasted_content id="1">\nINFO request served in 12 ms\n</pasted_content id="1">\n'
+        _, ctx = run("Here is the log:\n" + paste + "The importer is too slow on large files, can you optimise the parsing loop?", d)
+        check("text after a pasted block whose closing tag carries an id still sets the category",
+              "Performance work" in ctx)
+    with tempfile.TemporaryDirectory() as d:
+        paste = '<pasted_content id="2">\nthe render is too slow, optimise the layout\n</pasted_content id="2">\n'
+        _, ctx = run("Please file this note under the docs folder for me.\n" + paste + "Put it in notes.md, thanks a lot.", d)
+        check("words only inside an id-closed pasted block -> silent", ctx == "")
+
     print("\nall cases passed" if not fails else f"\n{fails} FAILED")
     return 1 if fails else 0
 

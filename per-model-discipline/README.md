@@ -33,8 +33,7 @@ written, a timestamped `settings.json.bak-*`, and the existing `hooks.UserPrompt
 array appended to rather than rewritten. Running it twice does not duplicate the entry. A
 `settings.json` that is not valid JSON is refused rather than repaired.
 
-**Hooks bind at session start**, so it activates in your *next* session. Confirm with
-`/hooks` (it should appear under `UserPromptSubmit`).
+Claude Code watches settings files and normally applies hook edits to the running session without a restart; if `/hooks` does not list it, restart the session. In an interactive session, hooks do not run until the workspace trust dialog has been accepted. It should appear under `UserPromptSubmit`.
 
 Pure Python stdlib, no dependencies.
 

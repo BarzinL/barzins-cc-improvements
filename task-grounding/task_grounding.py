@@ -60,7 +60,7 @@ def is_typed_prompt(prompt: str, min_chars: int) -> bool:
 def strip_quoted(prompt: str) -> str:
     """Drop fenced code and pasted blocks so pasted logs do not set the category."""
     p = re.sub(r"```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)", " ", prompt, flags=re.DOTALL)
-    return re.sub(r"<pasted_content\b.*?(?:</pasted_content>|\Z)", " ", p, flags=re.DOTALL)
+    return re.sub(r"<pasted_content\b.*?(?:</pasted_content\b[^>]*>|\Z)", " ", p, flags=re.DOTALL)
 
 
 def matches(prompt: str, cats) -> list[tuple[str, str]]:

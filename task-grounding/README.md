@@ -181,8 +181,7 @@ Properties:
 3. For the scientific directive to name the checker, copy
    `reference-store/check_reference.py` beside `task_grounding.py`. Without it the
    directive points only at `docs/reference/INDEX.md`.
-4. Hooks bind at session start, so it is active from the next session. Confirm with
-   `/hooks`.
+4. Claude Code watches settings files and normally applies hook edits to the running session without a restart; if `/hooks` does not list it, restart the session. In an interactive session, hooks do not run until the workspace trust dialog has been accepted.
 
 ## Test
 

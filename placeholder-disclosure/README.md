@@ -86,6 +86,8 @@ transcript walk and the pattern-table idea are copied rather than imported.
   time; if a later Bash command rewrote the file, lines may be off.
 - **Subagents.** A Stop hook runs for the main agent only.
 
+**Limits that come from Claude Code itself.** The hook reads the session transcript. The official documentation says the transcript is written asynchronously and may not yet include the turn's latest messages when a hook fires, and that the transcript format is internal and changes between versions. So the hook can miss a tool call made at the very end of a turn, and a Claude Code update can break its reading of the transcript without warning. Rerun the tests after an update.
+
 ## Install
 
 1. Copy `placeholder_disclosure.py` into the project, for example
@@ -110,8 +112,7 @@ transcript walk and the pattern-table idea are copied rather than imported.
    }
    ```
 
-3. Hooks bind at session start, so it is active from the next session. Confirm with
-   `/hooks`.
+3. Claude Code watches settings files and normally applies hook edits to the running session without a restart; if `/hooks` does not list it, restart the session. In an interactive session, hooks do not run until the workspace trust dialog has been accepted.
 
 Python standard library only.
 

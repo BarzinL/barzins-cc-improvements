@@ -109,6 +109,10 @@ directory, give each item a short key (`S1:`), and mark items `[x]` when done."
   (the documentation says it needs Claude Code v2.1.257 or later). The hook is then
   silent. The scratchpad is temporary storage and can be cleared by a reboot.
 
+**Limits that come from Claude Code itself.** The hook reads the session transcript. The official documentation says the transcript is written asynchronously and may not yet include the turn's latest messages when a hook fires, and that the transcript format is internal and changes between versions. So the hook can miss a tool call made at the very end of a turn, and a Claude Code update can break its reading of the transcript without warning. Rerun the tests after an update.
+
+**No scratchpad, no check.** Per the official documentation a session has a scratchpad only when it is signed in with a claude.ai account (not an API key), uses the Anthropic API (not Bedrock, Google Cloud or Foundry), and `enableArtifact` is not `false`. In other sessions the hook stays silent.
+
 ## Install
 
 1. Copy `plan_reconciliation.py` into the project, for example
@@ -133,8 +137,7 @@ directory, give each item a short key (`S1:`), and mark items `[x]` when done."
    }
    ```
 
-3. Hooks bind at session start, so it is active from the next session. Confirm with
-   `/hooks`.
+3. Claude Code watches settings files and normally applies hook edits to the running session without a restart; if `/hooks` does not list it, restart the session. In an interactive session, hooks do not run until the workspace trust dialog has been accepted.
 
 Python standard library only.
 

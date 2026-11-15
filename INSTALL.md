@@ -65,8 +65,8 @@ registration step. Confirm with `/help` or by invoking one.
 
 ## 3. The mechanical pieces - these edit `settings.json`
 
-Hooks, a mod and a script. **Hooks bind at session start**, so anything installed here
-activates in the *next* session, not the current one. Confirm with `/hooks`.
+Hooks, a mod and a script. Claude Code normally applies hook edits to the running session
+without a restart. Confirm with `/hooks`; if a hook is not listed, restart the session.
 
 ### per-model-discipline (has an installer)
 

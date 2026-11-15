@@ -143,6 +143,8 @@ Properties:
 - **Truth.** It checks that a check of the right kind ran and did not visibly fail, not that
   the claim is correct.
 
+**Limits that come from Claude Code itself.** The hook reads the session transcript. The official documentation says the transcript is written asynchronously and may not yet include the turn's latest messages when a hook fires, and that the transcript format is internal and changes between versions. So the hook can miss a tool call made at the very end of a turn, and a Claude Code update can break its reading of the transcript without warning. Rerun the tests after an update.
+
 ## Install
 
 1. Copy `verification_claim_gate.py` into your project's hooks directory, e.g.
@@ -169,8 +171,7 @@ Properties:
    }
    ```
 
-3. **Hooks bind at session start**, so it activates in your *next* session, not the one
-   where you added it. Confirm with `/hooks` (it should appear under `Stop`).
+3. Claude Code watches settings files and normally applies hook edits to the running session without a restart; if `/hooks` does not list it, restart the session. In an interactive session, hooks do not run until the workspace trust dialog has been accepted. It should appear under `Stop`.
 
 ## Tune it to your stack
 
