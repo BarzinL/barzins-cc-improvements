@@ -22,7 +22,7 @@ sys.path.insert(0, str(HERE))
 
 import extract_user_messages as ex  # noqa: E402
 
-TS = iter(f"2026-01-01T00:{m:02d}:00.000Z" for m in range(60))
+TS = iter(f"2026-01-01T{m // 60:02d}:{m % 60:02d}:00.000Z" for m in range(24 * 60))
 
 
 def ts() -> str:
@@ -227,6 +227,135 @@ EXCLUDED_MARKERS = {
 }
 
 
+def ask(tool_id: str, questions: list[dict], **extra) -> dict:
+    """An assistant record calling AskUserQuestion."""
+    rec = {
+        "type": "assistant",
+        "isSidechain": False,
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": tool_id, "name": "AskUserQuestion", "input": {"questions": questions}}],
+        },
+        "timestamp": ts(),
+    }
+    rec.update(extra)
+    return rec
+
+
+def ask_result(tool_id: str, questions: list[dict], data: dict, content: str | None = None, **extra) -> dict:
+    """The tool_result record Claude Code writes when the user answers. Shape as
+    2.1.323 to 2.1.325 write it: no origin, toolUseResult holds questions and
+    answers, plus response / annotations when present."""
+    if content is None:
+        pairs = ", ".join(f'"{q}"="{a}"' for q, a in data.get("answers", {}).items())
+        content = f"The user answered: {pairs}. Read the answers carefully and follow what they actually say."
+    rec = user(
+        [{"type": "tool_result", "tool_use_id": tool_id, "content": content}],
+        toolUseResult={"questions": questions, **data},
+        sourceToolAssistantUUID="u-" + tool_id,
+    )
+    rec.update(extra)
+    return rec
+
+
+def q(question: str, labels: list[str], multi: bool = False) -> dict:
+    return {
+        "question": question,
+        "header": question[:10],
+        "multiSelect": multi,
+        "options": [{"label": lab, "description": "Agent-written description of " + lab} for lab in labels],
+    }
+
+
+Q_PET = q("Which pet should the example use?", ["Cat", "Dog"])
+Q_LANGS = q("Which languages do you read?", ["Rust", "Go", "C, C++"], multi=True)
+Q_DIR = q("Where should the files go?", ["src/", "lib/"])
+Q_SHELL = q("Which shell tools do you know?", ["grep", "sed", "awk"], multi=True)
+Q_NOTE = q("Pick a colour scheme.", ["Light", "Dark"])
+Q_SKIP = q("Should I also update the docs?", ["Yes", "No"])
+
+# Answers to AskUserQuestion prompts, interleaved with typed messages and with
+# tool results that must still be excluded.
+ASK_SESSION = [
+    human("Write a small example program."),
+    # 1: single-select, an option chosen, plus a note typed on the answer
+    ask("ask1", [Q_PET]),
+    ask_result(
+        "ask1",
+        [Q_PET],
+        {"answers": {Q_PET["question"]: "Dog"}, "annotations": {Q_PET["question"]: {"notes": "a small one, please"}}},
+    ),
+    # 2: multi-select recorded as a list; 3: single-select "Other" typed text
+    ask("ask2", [Q_LANGS, Q_DIR]),
+    ask_result(
+        "ask2",
+        [Q_LANGS, Q_DIR],
+        {"answers": {Q_LANGS["question"]: ["Rust", "C, C++"], Q_DIR["question"]: "put them under examples/ instead"}},
+    ),
+    # 4: multi-select recorded as one joined string mixing options and typed text;
+    #    preview is agent-written and must not be printed
+    ask("ask3", [Q_SHELL]),
+    ask_result(
+        "ask3",
+        [Q_SHELL],
+        {
+            "answers": {Q_SHELL["question"]: "grep, awk, and jq a little"},
+            "annotations": {Q_SHELL["question"]: {"preview": "AGENT PREVIEW TEXT"}},
+        },
+    ),
+    # 5: no option selected, notes only; plus a free-text response to the prompt
+    ask("ask4", [Q_NOTE]),
+    ask_result(
+        "ask4",
+        [Q_NOTE],
+        {
+            "answers": {Q_NOTE["question"]: "(notes only)"},
+            "annotations": {Q_NOTE["question"]: {"notes": "whatever the terminal uses"}},
+            "response": "Also keep it under 50 lines.",
+        },
+    ),
+    # unanswered prompt: nothing the user typed
+    ask("ask5", [Q_SKIP]),
+    ask_result("ask5", [Q_SKIP], {"answers": {}}, content="The user did not answer the questions."),
+    # rejected prompt: error result, no answers
+    ask("ask6", [Q_SKIP]),
+    user(
+        [{"type": "tool_result", "tool_use_id": "ask6", "is_error": True, "content": "The user doesn't want to proceed with this tool use."}],
+        toolUseResult="User rejected tool use",
+    ),
+    # an ordinary tool result whose payload looks like an answer: not an AskUserQuestion id
+    {
+        "type": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "bash1", "name": "Bash", "input": {"command": "cat a.json"}}]},
+        "timestamp": ts(),
+    },
+    user(
+        [{"type": "tool_result", "tool_use_id": "bash1", "content": "SPOOFED BASH OUTPUT"}],
+        toolUseResult={"questions": [Q_SKIP], "answers": {Q_SKIP["question"]: "SPOOFED ANSWER"}},
+    ),
+    # a tool result naming an id no AskUserQuestion call used
+    user(
+        [{"type": "tool_result", "tool_use_id": "nope", "content": "x"}],
+        toolUseResult={"questions": [Q_SKIP], "answers": {Q_SKIP["question"]: "ORPHAN ANSWER"}},
+    ),
+    # a subagent's AskUserQuestion exchange inside the main file
+    ask("ask7", [Q_SKIP], isSidechain=True),
+    ask_result("ask7", [Q_SKIP], {"answers": {Q_SKIP["question"]: "SIDECHAIN ANSWER"}}, isSidechain=True),
+    human("Thanks, go ahead."),
+]
+
+ASK_EXCLUDED = {
+    "preview (agent-written)": "AGENT PREVIEW TEXT",
+    "option descriptions (agent-written)": "Agent-written description",
+    "ordinary tool result with answer-shaped payload": "SPOOFED",
+    "tool result with unknown id": "ORPHAN ANSWER",
+    "sidechain answer": "SIDECHAIN ANSWER",
+    "unanswered prompt": "Should I also update the docs?",
+    "rejection message": "doesn't want to proceed",
+    "harness wording of the tool result": "Read the answers carefully",
+}
+
+
 def write_jsonl(records: list, extra_lines: list[str] = ()) -> str:
     f = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8")
     for r in records:
@@ -280,6 +409,112 @@ def main() -> int:
         results.append(("--stats reports unparseable lines", "unparseable lines: 2" in r_stats.stderr))
     finally:
         Path(path).unlink(missing_ok=True)
+
+    # answers to AskUserQuestion prompts
+    apath = write_jsonl(ASK_SESSION)
+    try:
+        r = run_cli(apath, "--json")
+        msgs = json.loads(r.stdout) if r.returncode == 0 else []
+        kinds = [m["kind"] for m in msgs]
+        results.append(
+            (
+                "AskUserQuestion: 4 answered prompts kept between the typed messages, in order",
+                kinds == ["message", "answer", "answer", "answer", "answer", "message"],
+            )
+        )
+        if kinds != ["message", "answer", "answer", "answer", "answer", "message"]:
+            print("    got kinds:", kinds)
+        answers = [m for m in msgs if m["kind"] == "answer"]
+
+        def qa(i: int) -> list:
+            return answers[i]["questions"] if i < len(answers) else []
+
+        results.append(
+            (
+                "AskUserQuestion: chosen option and typed note kept, with the question",
+                qa(0)
+                == [{"question": Q_PET["question"], "chosen": ["Dog"], "typed": [], "notes": "a small one, please"}],
+            )
+        )
+        results.append(
+            (
+                "AskUserQuestion: multi-select list (label containing ', ') and single-select Other text",
+                qa(1)
+                == [
+                    {"question": Q_LANGS["question"], "chosen": ["Rust", "C, C++"], "typed": [], "notes": None},
+                    {"question": Q_DIR["question"], "chosen": [], "typed": ["put them under examples/ instead"], "notes": None},
+                ],
+            )
+        )
+        results.append(
+            (
+                "AskUserQuestion: joined multi-select string split into options and typed Other text",
+                qa(2)
+                == [{"question": Q_SHELL["question"], "chosen": ["grep", "awk"], "typed": ["and jq a little"], "notes": None}],
+            )
+        )
+        results.append(
+            (
+                "AskUserQuestion: notes-only answer and free-text response kept",
+                qa(3) == [{"question": Q_NOTE["question"], "chosen": [], "typed": [], "notes": "whatever the terminal uses"}]
+                and len(answers) > 3
+                and answers[3].get("response") == "Also keep it under 50 lines.",
+            )
+        )
+
+        out = run_cli(apath).stdout
+        for kind, marker in ASK_EXCLUDED.items():
+            results.append((f"AskUserQuestion: excluded {kind}", marker not in out))
+        results.append(
+            (
+                "AskUserQuestion: text output labels the question as the agent's and the answer as the user's",
+                "[agent asked] " + Q_PET["question"] in out
+                and "[user chose] Dog" in out
+                and "[user's note] a small one, please" in out
+                and "[user typed] put them under examples/ instead" in out
+                and "[user typed] and jq a little" in out
+                and "[user's reply to the prompt] Also keep it under 50 lines." in out
+                and "answer to questions the agent asked" in out,
+            )
+        )
+        results.append(("AskUserQuestion: header counts answers as messages", "6 message(s)" in out))
+        r_stats = run_cli(apath, "--stats")
+        results.append(
+            (
+                "AskUserQuestion: --stats separates answers from other tool results",
+                "kept: answer to AskUserQuestion" in r_stats.stderr and "excluded: tool result" in r_stats.stderr,
+            )
+        )
+    finally:
+        Path(apath).unlink(missing_ok=True)
+
+    # library: splitting one question's answer into chosen options and typed text
+    langs = {"Rust", "Go", "C, C++"}
+    results.append(
+        (
+            "split: JSON-quoted label containing ', ' in a joined multi-select string",
+            ex._split_answer('"C, C++", Go', langs, True) == (["C, C++", "Go"], []),
+        )
+    )
+    results.append(
+        (
+            "split: typed text with commas and no option kept whole",
+            ex._split_answer("none of these, sorry, maybe later", langs, True) == ([], ["none of these, sorry, maybe later"]),
+        )
+    )
+    results.append(
+        (
+            "split: single-select typed text with commas kept whole",
+            ex._split_answer("Go, but only the basics", langs, False) == ([], ["Go, but only the basics"]),
+        )
+    )
+    results.append(("split: notes-only value means nothing chosen", ex._split_answer("(notes only)", langs, False) == ([], [])))
+    reason, msg = ex.classify(
+        ask_result("t9", [Q_PET], {"answers": {Q_PET["question"]: "Cat"}, "afkTimeoutMs": 60000}), {"t9"}
+    )
+    results.append(("classify: timed-out prompt kept and marked", msg is not None and msg.get("timed_out") is True))
+    reason, msg = ex.classify(ask_result("t9", [Q_PET], {"answers": {Q_PET["question"]: "Cat"}}))
+    results.append(("classify: answer-shaped tool result without known ask ids excluded", msg is None))
 
     # library: classify() on single records
     reason, msg = ex.classify(user([{"type": "tool_result", "content": "x"}]))

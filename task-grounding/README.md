@@ -3,7 +3,9 @@
 A UserPromptSubmit hook that recognises a few categories of work from the words of
 the prompt and adds one short directive for each, once per session: measure before
 and after for performance work, render and look for visual work, read sources before
-coding for scientific work, and write a plan file for multi-step work.
+coding for scientific work, write a plan file for multi-step work, and, for a large
+piece of work meant for a reader (a course, tutorial, guide, documentation, long
+report), state the reading and the reader and show one piece before building the rest.
 
 Targeted at: Opus 5.5
 
@@ -37,6 +39,15 @@ is weak in these categories. This hook decides the category mechanically, from t
 prompt's words, and adds the step as an instruction at the start of the work. It
 costs one short paragraph per category per session.
 
+The reader category comes from a different source: a trial of this repository's
+`request-fidelity-review/` reviewer on 2026-11-15, on five past cases where an agent
+misread what the user wanted. The misreadings were about the reader's level, the
+register and the teaching order, and about one ambiguous key phrase in the request, not
+about scope. A review after the work was built caught 1 of the 5 and, where it did
+catch, saved little, because the whole deliverable had already been produced. The
+check is cheaper before the work: say which reading and which reader you are assuming,
+then show one piece.
+
 ## What it does
 
 On each `UserPromptSubmit`, the hook:
@@ -62,6 +73,7 @@ On each `UserPromptSubmit`, the hook:
 | visual | screenshot, mockup, wireframe, page or CSS layout, renderer, render the page / image / chart, diagram, bar or line chart, plot, matplotlib, CSS, SVG, canvas, shader, Figma, CAD, UI, pixel, font | Render the output to an image and look at it before reporting; compare with any reference image. |
 | scientific | simulation, numerical, ODE / PDE solver, finite element, Monte Carlo, Bayesian, linear or logistic regression, statistical test, statistically significant, t-test, p-value, genome, protein or DNA sequences, sequencing, molecule, spectroscopy, FFT, Fourier, eigenvalue, SI units, unit conversion, dimensional analysis, methylation | Say first that this is domain work; look in the project reference; if nothing is there, read primary sources and add an entry; validate against a known answer; state units. |
 | multi-step | end to end, phases, milestones, migration, refactor, roadmap, step by step, or a list of three or more items | Write the steps as a checklist in `plan.md` in the scratchpad, tick them off, account for every item at the end. |
+| reader | write / draft / create / put together / build / want ... a course, lessons, tutorial, explainer, walkthrough, primer, handbook, guide, write-up; write / draft / create ... documentation or docs; a long or detailed report, a report on / about; teach me; so (that) I can understand; explain / teach / learn ... from the (very) beginning, from first principles, from zero, assuming I know nothing, complete beginner | Before building all of it: state the reading of the key phrase and who the reader is and what they know, in the user's words; build one lesson or section and show it first; check its order, pitch and wording against any level or goal the user stated. |
 
 The patterns are narrow on purpose. A bare "regression", "sequence", "statistics",
 "unit", "chart", "render", "faster", "slow", "profile" or "simulate" appears in ordinary
@@ -71,6 +83,23 @@ beside it that places it in the category. This loses some recall: "the simulated
 step diverges" is missed, and "make the plot render faster" sets visual but not
 performance. A directive that fires on ordinary coding prompts costs more than one that
 sometimes misses.
+
+The reader pattern draws its boundary the same way. A deliverable noun counts only
+after a verb of producing or asking for it ("write", "draft", "put together", "I want"),
+within four words, and only when the noun ends the phrase: it must be followed by
+punctuation, the end of the prompt, or a word that starts a description ("on", "about",
+"for", "that", "so", ...). A noun followed by another noun is a modifier and does not
+count: "a test report parser", "the tutorial page", "the course table", "the docs
+build", "a bug report template". "Documentation" and "docs" need an authoring verb
+("write", "draft", "create", "put together"), so "build the docs" and "update the
+documentation for the flag" stay silent. A plain "report" needs "on", "about",
+"explaining" or "covering" after it, or an adjective before it ("long", "detailed",
+"full", ...), so "generate a coverage report" stays silent. "Explain" alone does not
+count; it needs a stated starting level within the same sentence ("from the beginning",
+"from first principles", "assuming I know nothing"). "Help me understand" does not
+count, because it is how debugging questions are often asked; "so that I can
+understand" does. "From scratch" is not used, because "rebuilt from scratch" is common
+in coding prompts.
 
 The scientific directive tells the agent how to search the project reference. The hook
 looks for `check_reference.py` (from `reference-store/`) beside itself, in a
@@ -129,6 +158,13 @@ Properties:
   category ("the UI shows a stale count" sets visual; "a quantum of work" sets scientific),
   and a prompt in a category phrased without a listed word is missed. The directive text
   tells the model to ignore one that does not apply.
+- **Known reader misfires and misses.** Found while choosing the boundary, left as they
+  are: "add comments to this function so I can understand it later" and "explain why the
+  loop restarts from the beginning when the file is empty" set the reader category, and
+  so does a small request such as "write docs for the new endpoint" when it is long
+  enough to pass the 40-character minimum. Missed: "I want to learn this from scratch",
+  a README or cheat sheet, and any request for a course or guide phrased without a
+  producing verb before the noun.
 - **Pasted text that is not fenced sets categories.** Claude Code expands pasted text
   into the prompt; only fenced blocks and `<pasted_content>` blocks are removed before
   matching. A pasted log that mentions "render" or "latency" counts as the user's
@@ -189,12 +225,14 @@ Properties:
 python3 test_task_grounding.py
 ```
 
-Standalone, no pytest. 44 cases: one prompt per category, a plain coding prompt, a short
+Standalone, no pytest. 74 cases: one prompt per category, a plain coding prompt, a short
 prompt, harness-tagged input, a slash command, category words only inside pasted code, the
 once-per-session rule within and across categories, two categories in one prompt, the
 session-id fallback, fail-open on malformed input and on an unreadable state file, a
 corrupt state file treated as empty, ten ordinary coding prompts that must stay silent, eight
 prompts that the narrowed patterns must still match, a prompt starting with an absolute
-path, and the checker path as found from where the hook is installed.
+path, the checker path as found from where the hook is installed, eleven reader prompts
+that must set the reader category, the reader directive's three steps, and sixteen
+ordinary coding prompts about docs, reports, guides and errors that must not set it.
 `TASK_GROUNDING=/path/to/other/task_grounding.py python3 test_task_grounding.py` runs the
 same cases against another copy of the hook.

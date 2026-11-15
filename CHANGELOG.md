@@ -4,6 +4,28 @@ Newest first. The most recent additions are also summarized under "What's new" i
 [README](README.md); entries move out of that section, not out of this file. Each heading
 names the model that was the main one in use when the entry was written.
 
+## 2026-11-15 (Opus 5.5)
+
+- [`request-fidelity-review/`](request-fidelity-review/): trialled on five past cases where
+  an agent misread the user's intent, plus three controls. It caught 1 of 5. Of its other
+  flags, 19 of 30 on the cases and 11 of 17 on the controls were judged noise, by a single
+  scorer who knew the answers. Not recommended for installation as it is: its prompt
+  forbids judging level, register and order, where the misreadings were, and run after the
+  work is built it saves little. It must run as an agent type that does not load the user's
+  memory index. The reviewer prompt is unchanged.
+- `extract_user_messages.py` now keeps the user's answers to AskUserQuestion prompts
+  (chosen options, typed "Other" text, notes, and a reply to the prompt), labelled as
+  answers to questions the agent asked. Claude Code records these as tool results, so the
+  extractor dropped them before. Other tool results are still excluded. Tests use
+  synthetic records.
+- [`task-grounding/`](task-grounding/): added a `reader` category for requests to produce a
+  large piece of work for a reader (a course, lessons, tutorial, guide, documentation, long
+  report, explainer, or "teach me" / "so that I can understand" / "explain ... from the
+  beginning"). Before building all of it, the agent states which reading of the key phrase
+  it takes and who the reader is, shows one representative piece first, and checks it
+  against any level or goal the user stated. Twenty-eight new tests, sixteen of them ordinary
+  coding prompts about docs, reports, guides and errors that must not set it.
+
 ## 2026-11-14 (Opus 5.5)
 
 Written by Opus 5.5 subagents against the shortcomings Anthropic's Opus 5.5 system card

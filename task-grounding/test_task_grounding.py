@@ -132,6 +132,56 @@ def main() -> int:
             _, ctx = run(prompt, d)
             check(f"narrowed pattern still matches -> {want}: {prompt[:50]}", want in ctx)
 
+    # Work for a reader: a large deliverable (course, tutorial, guide, documentation,
+    # long report, explainer) or a request to be taught from a stated level.
+    reader = "Work for a reader"
+    for prompt in [
+        "Write a short course on SQL joins with exercises, one lesson per join type.",
+        "Can you put together a tutorial on setting up the dev environment for new hires?",
+        "Write documentation for the plugin API so other teams can build on it.",
+        "Write a detailed report on why the nightly jobs failed last week.",
+        "I'd like an explainer about how the cache invalidation works, for the wiki.",
+        "Teach me how TCP congestion control works, I want to really get it this time.",
+        "Explain how git stores objects from the very beginning, assuming I know nothing.",
+        "Go through the scheduler design and lay it out so that I can understand it properly.",
+        "Explain Rust lifetimes from first principles please, with small examples.",
+        "Draft a migration guide for users moving from version 2 to version 3.",
+        "I want a series of lessons on linear algebra for programmers, starting at vectors.",
+    ]:
+        with tempfile.TemporaryDirectory() as d:
+            _, ctx = run(prompt, d)
+            check(f"reader deliverable -> directive: {prompt[:55]}", reader in ctx)
+
+    with tempfile.TemporaryDirectory() as d:
+        _, ctx = run("Write a short course on SQL joins with exercises, one lesson per join type.", d)
+        check("reader directive asks for the reading, the reader, one piece first, and a check against the stated level",
+              all(w in ctx for w in ("key phrase", "who the reader is", "one representative piece", "before producing the rest",
+                                     "order, pitch and wording")))
+
+    # Ordinary coding prompts that mention docs, reports, guides or explaining: must not
+    # set the reader category.
+    for prompt in [
+        "Fix the docs build, sphinx fails on the new module with an import error.",
+        "Update the README badge so it points at the new CI workflow instead.",
+        "Add a docstring to the parse_config function describing its arguments.",
+        "Write a test report parser that reads the JUnit XML and prints failures.",
+        "Explain this error please: TypeError: undefined is not a function",
+        "Generate a coverage report for the tests and fail the build under 80 percent.",
+        "Make the docs build run in CI on every pull request to main.",
+        "Create a bug report template in .github with fields for version and steps.",
+        "Add a link to the tutorial page in the footer of the landing site.",
+        "Write the handler first, and make it of course return a 404 for unknown ids.",
+        "Help me understand why this test fails only on the CI runner and not locally.",
+        "Build the course table migration and add an index on the slug column.",
+        "Update the documentation for the --verbose flag, it now takes a level.",
+        "I don't understand why the cache is rebuilt from scratch on every run.",
+        "Rename the guide_id column to guide_slug in the lessons model and its tests.",
+        "Can you explain what this regex does? It is in the config loader.",
+    ]:
+        with tempfile.TemporaryDirectory() as d:
+            _, ctx = run(prompt, d)
+            check(f"reader misfire -> not set: {prompt[:55]}", reader not in ctx)
+
     with tempfile.TemporaryDirectory() as d:
         _, ctx = run("/home/me/proj/solver.py has a bug in the ODE step size, can you look at it?", d)
         check("prompt starting with an absolute path is not a slash command -> scientific directive",

@@ -2,8 +2,9 @@
 """Print every message the user actually typed in a Claude Code session.
 
 Reads a session transcript (JSONL) and prints the user's own messages,
-verbatim and in order. Everything the harness put in the user's turn is left
-out: tool results, system reminders, hook output, subagent reports, task
+verbatim and in order, plus the user's answers to AskUserQuestion prompts.
+Everything the harness put in the user's turn is left out: other tool results,
+system reminders, hook output, subagent reports, task
 notifications, messages from other sessions, local-command output, compaction
 summaries, skill expansions, image captions, IDE context and interruption
 markers.
@@ -22,7 +23,17 @@ is kept only if it is one of:
    printed as `! ...`;
 4. a `queued_command` attachment whose origin is human (a message typed while
    Claude was working). When the same text is also recorded as a human message
-   next to it, only one copy is printed.
+   next to it, only one copy is printed;
+5. the user's answer to an AskUserQuestion prompt. Claude Code records it as a
+   tool result, so it is kept only when the record holds exactly one
+   `tool_result` block, that block answers a `tool_use` named AskUserQuestion
+   earlier in the same file (not in a sidechain), and `toolUseResult` holds the
+   `questions` list and `answers` mapping. Printed per question: the question
+   (labelled as the agent's words), the options the user chose, any text the
+   user typed instead ("Other"), the user's note on that question, and any
+   reply the user typed to the prompt as a whole. Option descriptions and
+   previews are the agent's words and are not printed. A prompt with no answer,
+   note or reply is excluded.
 
 Anything else is excluded, including kinds this script has never seen. A
 transcript with no `origin` fields at all predates that field, and a subagent
@@ -59,6 +70,10 @@ COMMAND = re.compile(
     re.DOTALL,
 )
 BASH_INPUT = re.compile(r"\A<bash-input>(?P<cmd>.*)</bash-input>\Z", re.DOTALL)
+
+ASK_TOOL = "AskUserQuestion"
+# Claude Code's value for "no option chosen, but the user wrote a note".
+NOTES_ONLY = "(notes only)"
 
 
 def _origin_kind(rec: dict) -> str | None:
@@ -105,8 +120,152 @@ def _single_text(content) -> str | None:
     return None
 
 
-def classify(rec: dict) -> tuple[str, dict | None]:
-    """(reason, message) for one record. message is None when excluded."""
+def ask_tool_ids(records: list[dict]) -> set[str]:
+    """Ids of AskUserQuestion calls made by the main session's assistant."""
+    ids: set[str] = set()
+    for rec in records:
+        if rec.get("type") != "assistant" or rec.get("isSidechain"):
+            continue
+        for b in _blocks((rec.get("message") or {}).get("content")):
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == ASK_TOOL:
+                if isinstance(b.get("id"), str):
+                    ids.add(b["id"])
+    return ids
+
+
+def _split_joined(s: str) -> list[str] | None:
+    """Split a multi-select answer Claude Code joined with ", ". Parts that
+    contain ", " or '"' are written as JSON strings. None if it does not parse."""
+    parts: list[str] = []
+    rest = s
+    while True:
+        if rest.startswith('"'):
+            end, esc = -1, False
+            for i in range(1, len(rest)):
+                if esc:
+                    esc = False
+                elif rest[i] == "\\":
+                    esc = True
+                elif rest[i] == '"':
+                    end = i
+                    break
+            if end == -1:
+                return None
+            try:
+                parts.append(json.loads(rest[: end + 1]))
+            except ValueError:
+                return None
+            rest = rest[end + 1 :]
+        else:
+            i = rest.find(", ")
+            parts.append(rest if i == -1 else rest[:i])
+            rest = "" if i == -1 else rest[i:]
+        if not rest:
+            return parts
+        if not rest.startswith(", "):
+            return None
+        rest = rest[2:]
+
+
+def _split_answer(answer, labels: set[str], multi: bool) -> tuple[list[str], list[str]]:
+    """(options chosen, text typed instead) for one question's answer."""
+    if answer is None or answer == "" or answer == NOTES_ONLY:
+        return [], []
+    if isinstance(answer, list):
+        parts = [p for p in answer if isinstance(p, str)]
+    elif not isinstance(answer, str):
+        return [], []
+    elif answer in labels:
+        return [answer], []
+    elif multi:
+        parts = _split_joined(answer) or [answer]
+        if not any(p in labels for p in parts):
+            parts = [answer]
+    else:
+        return [], [answer]
+    chosen: list[str] = []
+    typed: list[str] = []
+    run: list[str] = []
+    for p in parts:
+        if p in labels:
+            if run:
+                typed.append(", ".join(run))
+                run = []
+            chosen.append(p)
+        else:
+            run.append(p)
+    if run:
+        typed.append(", ".join(run))
+    return chosen, typed
+
+
+def _ask_answer(rec: dict, ts: str) -> tuple[str, dict | None]:
+    """Classify a tool result that answers an AskUserQuestion call."""
+    data = rec.get("toolUseResult")
+    if not isinstance(data, dict):
+        return "excluded: AskUserQuestion not answered (rejected or failed)", None
+    questions = data.get("questions")
+    answers = data.get("answers")
+    if not isinstance(questions, list) or not isinstance(answers, dict):
+        return "excluded: AskUserQuestion result of unknown shape", None
+    notes_by_q = data.get("annotations") if isinstance(data.get("annotations"), dict) else {}
+
+    seen: set[str] = set()
+    out_qs: list[dict] = []
+    asked = [qq for qq in questions if isinstance(qq, dict) and isinstance(qq.get("question"), str)]
+    asked += [{"question": k} for k in answers if isinstance(k, str) and k not in {qq["question"] for qq in asked}]
+    for qq in asked:
+        text = qq["question"]
+        if text in seen:
+            continue
+        seen.add(text)
+        labels = {
+            o["label"] for o in qq.get("options") or [] if isinstance(o, dict) and isinstance(o.get("label"), str)
+        }
+        chosen, typed = _split_answer(answers.get(text), labels, qq.get("multiSelect") is True)
+        ann = notes_by_q.get(text)
+        notes = ann.get("notes") if isinstance(ann, dict) else None
+        notes = notes if isinstance(notes, str) and notes.strip() else None
+        if chosen or typed or notes:
+            out_qs.append({"question": text, "chosen": chosen, "typed": typed, "notes": notes})
+
+    response = data.get("response")
+    response = response if isinstance(response, str) and response.strip() else None
+    if not out_qs and response is None:
+        return "excluded: AskUserQuestion not answered", None
+
+    lines: list[str] = []
+    for qa in out_qs:
+        lines.append(f"[agent asked] {qa['question']}")
+        lines += [f"[user chose] {c}" for c in qa["chosen"]]
+        lines += [f"[user typed] {t}" for t in qa["typed"]]
+        if not qa["chosen"] and not qa["typed"]:
+            lines.append("[no option chosen]")
+        if qa["notes"]:
+            lines.append(f"[user's note] {qa['notes']}")
+    if response is not None:
+        lines.append(f"[user's reply to the prompt] {response}")
+    msg = {
+        "kind": "answer",
+        "timestamp": ts,
+        "text": "\n".join(lines),
+        "images": 0,
+        "dropped_blocks": 0,
+        "questions": out_qs,
+        "response": response,
+    }
+    if data.get("afkTimeoutMs"):
+        msg["timed_out"] = True
+    if data.get("followUp") is True:
+        msg["follow_up"] = True
+    return "kept: answer to AskUserQuestion", msg
+
+
+def classify(rec: dict, ask_ids: set[str] | frozenset = frozenset()) -> tuple[str, dict | None]:
+    """(reason, message) for one record. message is None when excluded.
+
+    ask_ids: ids of the session's AskUserQuestion calls (see ask_tool_ids);
+    without them no tool result is kept."""
     t = rec.get("type")
     ts = rec.get("timestamp", "")
 
@@ -138,6 +297,8 @@ def classify(rec: dict) -> tuple[str, dict | None]:
     content = (rec.get("message") or {}).get("content")
     bl = [b for b in _blocks(content) if isinstance(b, dict)]
     if bl and all(b.get("type") == "tool_result" for b in bl):
+        if len(bl) == 1 and bl[0].get("tool_use_id") in ask_ids:
+            return _ask_answer(rec, ts)
         return "excluded: tool result", None
 
     kind = _origin_kind(rec)
@@ -214,8 +375,9 @@ def extract(records: list[dict]) -> tuple[list[dict], Counter]:
     """User messages in order, and a count of every classification."""
     out: list[dict] = []
     stats: Counter = Counter()
+    ask_ids = ask_tool_ids(records)
     for rec in records:
-        reason, msg = classify(rec)
+        reason, msg = classify(rec, ask_ids)
         # A queued message and the record of the same message can both be
         # written; keep one, preferring the record.
         if msg is not None and out and out[-1]["text"] == msg["text"]:
@@ -236,11 +398,21 @@ def render_text(messages: list[dict], source: str) -> str:
         f"# Messages the user typed, from {source}: {len(messages)} message(s).",
         "# Extracted verbatim, in order. Lines starting with '-----' are added by the",
         "# extractor; everything between them is the user's text exactly as sent.",
+        "# Exception: in an answer to questions the agent asked, each line starts with",
+        "# a bracketed label added by the extractor; '[agent asked]' lines are the",
+        "# agent's question, '[user chose]' lines are option labels the agent wrote",
+        "# and the user picked, and the other labelled lines are the user's own text.",
         "",
     ]
     for i, m in enumerate(messages, 1):
         notes = []
-        if m["kind"] == "command":
+        if m["kind"] == "answer":
+            notes.append("answer to questions the agent asked (AskUserQuestion)")
+            if m.get("timed_out"):
+                notes.append("prompt timed out: selected, not submitted")
+            if m.get("follow_up"):
+                notes.append("user asked for more questions")
+        elif m["kind"] == "command":
             notes.append("slash command")
         elif m["kind"] == "shell":
             notes.append("shell command typed with !")

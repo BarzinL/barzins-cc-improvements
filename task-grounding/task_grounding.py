@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Claude Code UserPromptSubmit hook: add one short directive when a prompt falls
 into a category of work where the Fable 5.2 system card reports Opus 5.5 furthest
-behind (performance, visual, scientific) or where a plan file is needed.
+behind (performance, visual, scientific), where a plan file is needed, or where a
+large piece of work for a reader should be checked with the user one piece first.
 
 The category is decided by pattern match on the prompt, not by the model judging
 its own familiarity. Each category's directive is added at most once per session.
