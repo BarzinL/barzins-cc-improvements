@@ -11,7 +11,9 @@ or unexpected input it exits 0 with no output.
 
 Rules are data: categories.json beside this file. In a directive, {reference} is
 replaced by how to search the project reference, naming the check_reference.py the
-hook finds from its own location.
+hook finds from its own location. A category with a "kit" uses the kit's directive,
+naming its tool and playbook by absolute path, when grounding-kits/<dir>/ is found
+beside the hook or one level up.
 
 An optional trial file can switch it off in a random half of sessions, so its effect
 can be measured (`trial_arm`; hook-trial/ in the repository).
@@ -48,9 +50,30 @@ def reference_hint() -> str:
     return f'run python3 "{p}" --find <term>, or {index}' if p else index
 
 
+def kit_dir(name: str, files: list[str], here: Path = Path(__file__).resolve().parent) -> Path | None:
+    """A grounding kit (grounding-kits/<name>/ in the repository), found from this hook's
+    own location: in a grounding-kits/ directory beside it or one level up. It counts only
+    if every file the directive names is there."""
+    for d in (here / "grounding-kits" / name, here.parent / "grounding-kits" / name):
+        if all((d / f).is_file() for f in files):
+            return d
+    return None
+
+
+def directive_for(cat: dict) -> str:
+    """The category's directive: the kit version, with {tool} and {playbook} replaced by
+    absolute paths, when its kit is found; otherwise the plain directive."""
+    kit = cat.get("kit")
+    if isinstance(kit, dict):
+        d = kit_dir(kit["dir"], [kit["tool"], kit["playbook"]])
+        if d is not None:
+            return kit["directive"].replace("{tool}", str(d / kit["tool"])).replace("{playbook}", str(d / kit["playbook"]))
+    return cat["directive"]
+
+
 def load_rules(path: Path = RULES) -> tuple[int, list[tuple[str, re.Pattern, str]]]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    cats = [(c["id"], re.compile(c["pattern"], re.IGNORECASE), c["directive"]) for c in data["categories"]]
+    cats = [(c["id"], re.compile(c["pattern"], re.IGNORECASE), directive_for(c)) for c in data["categories"]]
     return int(data.get("min_prompt_chars", 40)), cats
 
 

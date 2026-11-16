@@ -6,6 +6,7 @@ names the model that was the main one in use when the entry was written.
 
 ## 2026-11-15 (Opus 5.5)
 
+- Added [`grounding-kits/`](grounding-kits/): `performance/` (`measure.py` times a command repeatedly into a record and compares two records with a seeded bootstrap interval, refusing different commands or inputs and failing commands; plus a playbook) and `scientific/` (`validate.py` keeps a record of checks with computed pass or fail, required tolerance and units, and observed order of convergence; plus a playbook). `task-grounding`'s performance and scientific directives name the kit's tool and playbook when the kit is found beside the hook, and fall back to the previous wording otherwise. Not yet evaluated for effect on outcomes.
 - Claim gate, revised for precision: an evaluation that replayed it over recorded sessions
   and read a sample of its firings judged most of them wrong. The check had often run in a
   form the gate did not see, the text was often not a claim of a check, or the message

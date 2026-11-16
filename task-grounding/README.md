@@ -117,8 +117,28 @@ repository), and names the first one found by absolute path:
 `run python3 "/abs/path/check_reference.py" --find <term>, or read docs/reference/INDEX.md`.
 If none is found, the directive says only `read docs/reference/INDEX.md`.
 
+The performance and scientific directives name a grounding kit when one is found
+(`grounding-kits/` in this repository, added 2026-11-15). The hook looks for
+`grounding-kits/performance/` and `grounding-kits/scientific/` beside itself or one level
+up, and uses a kit only if both its tool and its `PLAYBOOK.md` are there. With the kit,
+the directive tells the agent to read the playbook and to use the tool, both named by
+absolute path:
+
+- performance: `Read "/abs/.../PLAYBOOK.md" first`, then time the command before the
+  change with `measure.py run --name before`, after it with `--name after`, run
+  `measure.py compare` on the two records, and report its verdict, both medians and the
+  command;
+- scientific: the same bold line and reference lookup as before, then `Read
+  "/abs/.../PLAYBOOK.md"`, record each check against an independent expectation with
+  `validate.py add`, and run its `summary` before reporting.
+
+Without the kit, each category sends the plain directive in the table above, unchanged.
+Each category's `kit` object in `categories.json` holds the kit's directory, tool,
+playbook and directive text.
+
 The multi-step directive feeds `plan-reconciliation/`, which reads that `plan.md` at
-the end of each turn. The scientific directive points at `reference-store/`.
+the end of each turn. The scientific directive points at `reference-store/`, and, when
+found, both it and the performance directive point at `grounding-kits/`.
 
 The rules are data. To add a category, change a pattern or reword a directive, edit
 `categories.json`; the hook reads it on every prompt.
@@ -187,7 +207,8 @@ Properties:
 - **Prompts that are not typed** (a `/loop` iteration, a message from another session)
   are matched like typed ones, except the two harness markers listed above.
 - **It delivers an instruction; it does not check one.** Nothing verifies that the
-  model measured, rendered, read the reference, or wrote `plan.md`. The claim gate's
+  model measured, rendered, read the reference, or wrote `plan.md`. The grounding kits
+  leave record files when they are used, but nothing checks that they were. The claim gate's
   speed check and `plan-reconciliation` check two of these afterwards, partly.
 
 ## Status
@@ -235,7 +256,11 @@ or with one it cannot read, it behaves as described above.
 3. For the scientific directive to name the checker, copy
    `reference-store/check_reference.py` beside `task_grounding.py`. Without it the
    directive points only at `docs/reference/INDEX.md`.
-4. Claude Code watches settings files and normally applies hook edits to the running session without a restart; if `/hooks` does not list it, restart the session. In an interactive session, hooks do not run until the workspace trust dialog has been accepted.
+4. For the performance and scientific directives to name the grounding kits, copy
+   `grounding-kits/` (or only the kits you want) beside `task_grounding.py`, so that
+   for example `.claude/hooks/grounding-kits/performance/measure.py` exists. Without
+   them the two directives are the plain ones.
+5. Claude Code watches settings files and normally applies hook edits to the running session without a restart; if `/hooks` does not list it, restart the session. In an interactive session, hooks do not run until the workspace trust dialog has been accepted.
 
 ## Test
 
@@ -243,7 +268,7 @@ or with one it cannot read, it behaves as described above.
 python3 test_task_grounding.py
 ```
 
-Standalone, no pytest. 85 cases: one prompt per category, a plain coding prompt, a short
+Standalone, no pytest. 91 cases: one prompt per category, a plain coding prompt, a short
 prompt, harness-tagged input, a slash command, category words only inside pasted code, the
 once-per-session rule within and across categories, two categories in one prompt, the
 session-id fallback, fail-open on malformed input and on an unreadable state file, a
@@ -251,7 +276,9 @@ corrupt state file treated as empty, ten ordinary coding prompts that must stay 
 prompts that the narrowed patterns must still match, seven prompts about setting up and
 running a benchmark suite that must not set performance and four about timing code with a
 benchmark that must, a prompt starting with an absolute path, the checker path as found
-from where the hook is installed, eleven reader prompts that must set the reader category,
+from where the hook is installed, the performance and scientific directives naming their
+grounding kit in the repository layout and in an installed copy and falling back to the
+plain directive word for word when the kit is absent or incomplete, eleven reader prompts that must set the reader category,
 the reader directive's three steps, and sixteen ordinary coding prompts about docs,
 reports, guides and errors that must not set it.
 `TASK_GROUNDING=/path/to/other/task_grounding.py python3 test_task_grounding.py` runs the

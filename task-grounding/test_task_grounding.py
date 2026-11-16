@@ -234,6 +234,39 @@ def main() -> int:
         check("hook installed with no checker nearby -> directive points at INDEX.md, names no checker",
               "Scientific" in ctx and "--find" not in ctx and "docs/reference/INDEX.md" in ctx)
 
+    # Grounding kits: the performance and scientific directives name the kit's tool and
+    # playbook by absolute path when the kit is found from the hook's location, and fall
+    # back to the plain directive in categories.json when it is not.
+    perf = "Can you optimise the hot path in the tokenizer? It is the bottleneck."
+    rules = {c["id"]: c for c in json.loads(HOOK.with_name("categories.json").read_text())["categories"]}
+    for cid, prompt, tool in (("performance", perf, "measure.py"), ("scientific", sci, "validate.py")):
+        kit = Path(__file__).resolve().parent.parent / "grounding-kits" / cid
+        with tempfile.TemporaryDirectory() as d:
+            _, ctx = run(prompt, d)
+            check(f"{cid} directive in the repository layout names the kit's tool and playbook, and both exist",
+                  f'"{kit / tool}"' in ctx and str(kit / "PLAYBOOK.md") in ctx
+                  and (kit / tool).is_file() and (kit / "PLAYBOOK.md").is_file())
+        with tempfile.TemporaryDirectory() as inst, tempfile.TemporaryDirectory() as d:
+            shutil.copy(HOOK, inst)
+            shutil.copy(HOOK.with_name("categories.json"), inst)
+            copy = Path(inst) / "grounding-kits" / cid
+            copy.mkdir(parents=True)
+            (copy / tool).write_text("# stand-in\n")
+            (copy / "PLAYBOOK.md").write_text("stand-in\n")
+            _, ctx = run(prompt, d, hook=Path(inst) / HOOK.name)
+            check(f"hook installed with grounding-kits/{cid}/ beside it -> {cid} directive names that copy",
+                  str(copy / tool) in ctx and str(copy / "PLAYBOOK.md") in ctx)
+        with tempfile.TemporaryDirectory() as inst, tempfile.TemporaryDirectory() as d:
+            shutil.copy(HOOK, inst)
+            shutil.copy(HOOK.with_name("categories.json"), inst)
+            copy = Path(inst) / "grounding-kits" / cid
+            copy.mkdir(parents=True)
+            (copy / tool).write_text("# stand-in\n")  # playbook missing: kit incomplete
+            _, ctx = run(prompt, d, hook=Path(inst) / HOOK.name)
+            plain = rules[cid]["directive"].replace("{reference}", "read docs/reference/INDEX.md")
+            check(f"hook installed with no complete {cid} kit -> the plain directive, word for word",
+                  plain in ctx and tool not in ctx and "PLAYBOOK" not in ctx)
+
     with tempfile.TemporaryDirectory() as d:
         paste = '<pasted_content id="1">\nINFO request served in 12 ms\n</pasted_content id="1">\n'
         _, ctx = run("Here is the log:\n" + paste + "The importer is too slow on large files, can you optimise the parsing loop?", d)
