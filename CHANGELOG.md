@@ -6,6 +6,20 @@ names the model that was the main one in use when the entry was written.
 
 ## 2026-11-15 (Opus 5.5)
 
+- Claim gate, revised for precision: an evaluation that replayed it over recorded sessions
+  and read a sample of its firings judged most of them wrong. The check had often run in a
+  form the gate did not see, the text was often not a claim of a check, or the message
+  attributed it to earlier work, a source, the user or another agent. Test and build claims
+  are now also supported by a test or check result in any output the turn read (a log or
+  background task's output read back, a CI status command, a pre-commit hook's output).
+  Speed and memory claims and quoted-command claims ("`make check` passes"), wrong in every
+  sampled case, are now off by default (`CLAIM_GATE_OPTIONAL=perf,cited` switches them on)
+  and narrowed. First-person "I tested" / "I checked" / "I've verified" are no longer
+  matched; "pass/fail", "pass-through", "after the tests pass", "when the build succeeds",
+  sentences citing a paper or pasted output, and read claims about another agent's reading
+  are skipped. Re-evaluated on a new sample of the revised gate's firings; the README's
+  status line says what remains. 38 new tests; the earlier tests for the two optional kinds
+  now run with them switched on.
 - Added [`hook-trial/`](hook-trial/): an optional on/off trial for the claim gate,
   `plan-reconciliation`, `placeholder-disclosure` and `task-grounding`. With a trial file
   (`<project>/.claude/hook-trial.json` or `~/.claude/hook-trial.json`) enabled, all four stay

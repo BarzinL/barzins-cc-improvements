@@ -17,6 +17,37 @@ gap the first replay found: reads anywhere in the session count, `cat`, `head`, 
 through <directory>" and "read all four <documents>" are checked against the reads, and a
 measured speed or memory claim needs a timing or benchmark command.
 
+Revised for precision (2026-11-15). An evaluation that replayed the previous version over
+recorded sessions and read a sample of its firings judged most of them wrong. The wrong
+firings were of three kinds: the check had run in the turn in a form the gate did not see (a
+test log or a background task's output read back, a CI status command, a pre-commit hook
+inside `git commit`, a benchmark script); the text was not a claim of a check ("pass/fail
+thresholds", a step called "X pass", "pass-through", an estimate such as "about 100x faster",
+a plan for later steps); or the message attributed the claim (to earlier work it described,
+to a paper, to output the user pasted, to another agent's session). Speed claims and claims
+that a command in backticks passed were wrong in every sampled case. The firings judged
+correct were end-of-work summaries that restated earlier results as current fact in a turn
+that ran nothing relevant. This revision:
+
+- counts a test or check result seen in the output of any call in the turn as support, not
+  only a test or build command (see the table);
+- puts speed and memory claims and quoted-command claims behind an option that is **off by
+  default** (`CLAIM_GATE_OPTIONAL`, below), and narrows both for when they are switched on;
+- no longer matches a first-person "I tested", "I checked", "I've verified", "I confirmed";
+- skips "pass" followed by `/` or `-`, claims inside a clause about a later time ("after the
+  tests pass", "when the build succeeds"), sentences citing a paper ("et al.") or output the
+  user pasted, and read claims whose reader is someone else ("It read main.py in full").
+
+The revised version was re-evaluated the same way on a new sample of its own firings; see
+**Status** below.
+
+## Status
+
+Advisory and still imprecise. On recorded sessions, after this revision, it fires on a small
+share of turn ends, and a reader judging a new sample of its firings still found wrong
+firings among them (see "What it cannot catch"). Treat a pause as a prompt to check the
+claim, and expect to answer "the hook is wrong here" some of the time.
+
 ## What it does
 
 When the main agent finishes a turn, the hook:
@@ -31,16 +62,16 @@ When the main agent finishes a turn, the hook:
 
 | Claim | Examples | Supported when |
 |---|---|---|
-| test | "all tests pass", "12 passed", "the test suite passes" | a test command ran, and the last one did not fail |
-| build | "the build passes", "compiles cleanly", "every check passed" | a build, check or test command ran, and the last one did not fail |
-| named command | "`make check` passes" | that command ran, and its last run did not fail |
-| works | "verified it works", "tested end-to-end", "I tested" | a command ran that does more than inspect files (not only `ls`, `cat`, `grep`, `git`...), and not every such command failed; or an HTTP fetch |
-| observation | "no errors", "the service is healthy", "I checked" | any observing tool call: a command, a Read, a search, a fetch |
+| test | "all tests pass", "12 passed", "the test suite passes" | a test command ran, or a call in the turn printed a test result (`41 passed`, `test result: ok`, `Ran 12 tests in`, `Suite PASSED`...: a log or a background task's output read back with `tail`, `cat`, Read or a task-output tool, or a CI status command); and the last such call did not fail |
+| build | "the build passes", "compiles cleanly", "every check passed" | a build, check or test command ran, or a call printed a test result or a check result (`pre-commit: OK`, `hooks passed`, `lint OK`, as a `git commit` with a pre-commit hook prints); and the last such call did not fail |
+| named command (off by default) | "`make check` passes" | that command ran, and its last run did not fail. Judged only when the quoted text looks like a command (a path, a script, or a lower-case program name with arguments), not an identifier, a commit hash or a step name |
+| works | "verified it works", "tested end-to-end", "verified live" | a command ran that does more than inspect files (not only `ls`, `cat`, `grep`, `git`...), and not every such command failed; or an HTTP fetch |
+| observation | "no errors", "the service is healthy" | any observing tool call: a command, a Read, a search, a fetch |
 | whole file | "I read the whole file", "read parser.rs in full" | the file named (or, if none is named, some file read in this turn) was read in full at some point in the session: by a Read with no line limit, by `cat` or `nl` at the end of a pipeline, or by Reads and `head` / `tail` / `sed -n` ranges that together cover every line. A file the claim names that was never read fails |
 | whole repository | "I read through the whole repository", "reviewed the entire codebase", "read every file" | never: reads cannot be shown to cover a repository, so the claim is always flagged and the agent is asked to name what it read |
 | directory | "I've read through widget-core", "went through src/" | judged only if the name is a directory of files read in the session; then every file read under it must have been read in full |
 | count of documents | "I read all four handoffs", "read both reports" | judged only if at least that many files read in the session have the noun in their names; then at least that many of them must have been read in full |
-| speed or memory | "3x faster", "reduced memory usage by 40%", "now runs in 1.2 s", "dropped from 900 ms to 300 ms" | a timing or benchmark program ran in this turn, in command position (`time`, `/usr/bin/time`, `hyperfine`, `perf stat`, `valgrind`, `cargo bench`, `go test -bench`, `pytest --benchmark`, `python -m timeit`, a program or script with `bench` in its name...), and not every such command failed |
+| speed or memory (off by default) | "3x faster", "reduced memory usage by 40%", "now runs in 1.2 s", "dropped from 900 ms to 300 ms" | a timing or benchmark program ran in this turn, in command position (`time`, `/usr/bin/time`, `hyperfine`, `perf stat`, `valgrind`, `cargo bench`, `go test -bench`, `pytest --benchmark`, `python -m timeit`, a program or script with `bench` in its name, run directly or by an interpreter such as `python3.12`...), and not every such command failed. A change "from X to Y" needs a unit (a count is not a timing); a figure after "~", "about", "roughly", "up to" and the like is an estimate and is not judged |
 
    A command **failed** if its result is marked `is_error` (Claude Code records a non-zero
    exit as `is_error: true` with the text `Exit code N`), or if its output contains a failure
@@ -84,12 +115,29 @@ How command reads are counted:
   read in full.
 
 Not counted as claims: text inside code blocks or quotation marks; negated, conditional or
-prospective uses ("once all tests pass", "should build cleanly"); a claim followed by
-"means", "counts as", "implies", "is required" and the like, which states a rule rather than
-reports a run ("all pass means the task counts as solved"); questions; and sentences
-that hedge ("haven't run it") or attribute the claim ("the subagent reported that all tests
-pass"). A hedge excuses only the sentence it is in. "Healthy" counts only next to a word for a
-running system (service, server, build, deployment...), not about a person or a design.
+prospective uses ("once all tests pass", "should build cleanly"); a clause about a later
+time ("after the new package's tests pass", "when the build succeeds"; "After the fix, all
+tests pass" is still a claim, because of the comma); "pass" followed by `/` or `-` ("all
+pass/fail thresholds", "pass-through"); a claim followed by "means", "counts as", "implies",
+"is required" and the like, which states a rule rather than reports a run ("all pass means
+the task counts as solved"); questions; sentences that hedge ("haven't run it") or attribute
+the claim ("the subagent reported that all tests pass", "Smith et al. measured...", "from the
+output you pasted"); a first-person account of a check ("I tested", "I checked", "I've
+verified", "I confirmed"), which at the end of a turn nearly always narrates earlier work;
+and a read claim whose reader is someone else ("It read main.py in full", "the agent read
+the whole file"). A hedge excuses only the sentence it is in. "Healthy" counts only next to a
+word for a running system (service, server, build, deployment...), not about a person or a
+design.
+
+### Optional claim kinds
+
+Two kinds are off by default because, in the evaluation above, they were nearly always
+wrong: speed and memory claims, and claims that a command quoted in backticks passed. Switch
+them on with the environment variable `CLAIM_GATE_OPTIONAL`, comma- or space-separated:
+`perf` for speed and memory claims, `cited` for quoted commands, for example
+`CLAIM_GATE_OPTIONAL=perf,cited`. (Claude Code passes its environment to hooks; the `env`
+block of `settings.json` sets it.) A command quoted in the message that ran and did not fail
+still supports a test, build or "works" claim whether or not `cited` is on.
 
 Properties:
 
@@ -101,6 +149,23 @@ Properties:
 - Python standard library only.
 
 ## What it cannot catch
+
+**Where it still fires wrongly.** The re-evaluation of the revised version found these kinds
+among its wrong firings:
+
+- checks that ran in the turn through programs it does not know (a compiler invoked as
+  `c++`, a server's own config test, a project's test or benchmark binary, a results table
+  computed from job output);
+- text that is not a report of a check: a number before "passed" that is not a test count
+  ("release 7 passed review"), "no error" describing a failure mode, an acceptance criterion
+  in a plan ("the suite stays green"), "pass" as a noun, a conditional with "we'd", a future
+  check ("that will show it works end to end");
+- an accurate partial result ("9 of 10 tests pass; the failing one is known"), where the
+  output shows the failure and the gate reads the claim as contradicted;
+- a claim the message itself ties to earlier runs in words its hedge list lacks ("these
+  numbers come from the runs I did before");
+- a compound command whose exit code comes from a later part (`pytest | tail && git
+  commit && ...`), read as a failed test run.
 
 - **Claims outside its phrase lists.** It matches fixed patterns. "I went over every module
   in src/" or "I read both config files" (a count with a two-word noun) are not matched, nor
@@ -135,7 +200,15 @@ Properties:
   only two of which have "handoff" in the file name, the count
   is not judged, so a real undercount of documents named differently is missed.
 - **Speed claims without a number or a "now".** "It runs in 40 minutes" is taken as
-  background and not checked, so a measurement phrased that way is missed.
+  background and not checked, so a measurement phrased that way is missed. With speed claims
+  off (the default), no speed or memory claim is checked at all.
+- **Test results printed by anything.** Since the 2026-11-15 revision, any output in the turn
+  that shows a test result (`41 passed`) supports a test claim, whatever printed it: a log
+  from an older run, a file that happens to contain such a line. The last such output
+  decides, so an old passing log read after a failing run reads as a pass.
+- **Claims the revision gave up.** A first-person "I checked that X" or "I tested it" with
+  nothing run is no longer flagged, nor is a claim inside "after ..." or "when ..." clauses,
+  nor a figure in a sentence that cites a paper. Some of these were real unsupported claims.
 - **Subagent work.** A subagent's tool calls are in its own transcript, not the turn's. A
   relayed claim passes only if the message attributes it.
 - **Failures the output does not show.** A command whose result was cut off, that ran in the
@@ -183,6 +256,9 @@ The patterns are module-level regexes:
   the message names it.
 - `_INSPECT_PROGRAMS`: programs that only inspect or move files and never count as a run.
 - `_FAIL_OUTPUT`: failure summaries recognised in output.
+- `_TEST_PASS_OUTPUT`, `_CHECK_PASS_OUTPUT`: test and check results recognised in output as
+  support for test and build claims.
+- `OPTIONAL_ENV` (`CLAIM_GATE_OPTIONAL`): the off-by-default claim kinds, `perf` and `cited`.
 - `_TEST_CLAIM`, `_BUILD_CLAIM`, `_RUN_CLAIM`, `_OBSERVE_CLAIM`, `_SCOPE_CLAIM`,
   `_REPO_CLAIM`, `_DIR_CLAIM`, `_COUNT_CLAIM`, `_PERF_CLAIM`: claim phrasings, by kind.
 - `_GENERIC_AFTER`: words after a claim that make it a rule rather than a report.
@@ -205,6 +281,12 @@ scope claims (a file read across two turns, `sed -n`, `cat`, `cat | head` alone 
 second command, a whole-repository claim) and `P-1` to `P-4` speed and memory claims.
 `G-1` to `G-13` were written from the defects a review of the second revision found, each
 from the input that showed it; each defect case failed against the gate before its fix.
+`R-1` to `R-17` (with lettered variants) are invented cases shaped like the kinds of wrong
+firing the 2026-11-15 evaluation found; each one that wants silence fired on the gate before
+that revision. `C-1` to `C-5` are shaped like the firings judged correct and must still fire.
+`O-1` to `O-3` check that speed and quoted-command claims are off by default and that
+`CLAIM_GATE_OPTIONAL` switches them on; the older cases written for those two kinds (`P-`,
+`G-5`, `G-8b`, `G-8c`, the named-command cases) run with both switched on.
 `CLAIM_GATE=/path/to/other/gate.py python3 test_verification_claim_gate.py` runs the same
 cases against another copy of the gate.
 

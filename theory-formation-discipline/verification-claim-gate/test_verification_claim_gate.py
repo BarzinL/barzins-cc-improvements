@@ -20,10 +20,13 @@ from pathlib import Path
 HOOK = Path(os.environ.get("CLAIM_GATE") or Path(__file__).resolve().parent / "verification_claim_gate.py")
 
 
-def _run(events: list[dict], stop_hook_active: bool = False, extra: dict | None = None) -> bool:
+def _run(events: list[dict], stop_hook_active: bool = False, extra: dict | None = None,
+         optional: str | None = None) -> bool:
     """Run the hook against a synthetic transcript. Returns True if it BLOCKED.
 
-    `extra` adds payload fields, e.g. `last_assistant_message`.
+    `extra` adds payload fields, e.g. `last_assistant_message`. `optional` sets
+    CLAIM_GATE_OPTIONAL, the off-by-default claim kinds to switch on ("perf,cited");
+    otherwise the variable is removed from the hook's environment.
     """
     with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
         for e in events:
@@ -31,11 +34,15 @@ def _run(events: list[dict], stop_hook_active: bool = False, extra: dict | None 
         tp = f.name
     payload = {"session_id": "test", "transcript_path": tp, "stop_hook_active": stop_hook_active}
     payload.update(extra or {})
+    env = {k: v for k, v in os.environ.items() if k != "CLAIM_GATE_OPTIONAL"}
+    if optional:
+        env["CLAIM_GATE_OPTIONAL"] = optional
     r = subprocess.run(
         [sys.executable, str(HOOK)],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
+        env=env,
     )
     Path(tp).unlink(missing_ok=True)
     out = r.stdout.strip()
@@ -570,6 +577,159 @@ FIXES = [
      [_prompt("synthesise"), *_read("/w/h/a_handoff.md", total=40), _asst_text("I read all four papers.")], False),
 ]
 
+def _tool(name: str, inp: dict, output: str) -> list[dict]:
+    """A call to a non-Bash tool (Read without metadata, a task-output tool) and its result."""
+    tid = f"toolu_{next(_ids)}"
+    return [{"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": name, "input": inp}]}},
+            {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tid, "content": output}]}}]
+
+
+# Speed and memory claims, and claims that a command quoted in backticks passed, are off by
+# default since the 2026-11-15 revision. Cases written for them run with both switched on.
+OPTIONAL = "perf,cited"
+_OPTIONAL_CASES = ("P-", "G-5", "G-8b", "G-8c", "a named command said to pass")
+
+# Precision cases (R-), written for the 2026-11-15 revision from the kinds of wrong firing an
+# evaluation on recorded sessions found. Invented text and tool calls of the same shape.
+# Each R- case that wants silence fired on the gate before the revision; the C- cases are
+# shaped like the firings judged correct and must still fire.
+# (name, events, want_block, optional kinds switched on or None)
+PRECISION = [
+    # 1. The check ran in the turn in a form the gate did not see.
+    ("R-1 test log read back with tail shows the suite passed -> silent",
+     [_prompt("is the suite done?"),
+      *_bash("tail -5 /tmp/run/suite.log", "....x....\n128 passed, 3 skipped in 47.9s\nexit status 0"),
+      _asst_text("The overnight suite passed: 128 passed, 3 skipped.")], False, None),
+    ("R-2 background task output read with cat shows the tests passed -> silent",
+     [_prompt("check the background run"),
+      *_bash("cat /tmp/run/tasks/b7.output | tail -3", "tests/test_export.py ....\n===== 19 passed in 4.02s ====="),
+      _asst_text("All 19 export tests pass now.")], False, None),
+    ("R-2b same, but the output read back shows a failure -> fires",
+     [_prompt("check the background run"),
+      *_bash("cat /tmp/run/tasks/b7.output | tail -3", "FAILED tests/test_export.py::test_csv\n1 failed, 18 passed in 4.10s"),
+      _asst_text("All 19 export tests pass now.")], True, None),
+    ("R-2c background output read with a task-output tool -> silent",
+     [_prompt("check the background run"),
+      *_tool("TaskOutput", {"task_id": "b7"}, "Ran 12 tests in 0.840s\n\nOK"),
+      _asst_text("The tests pass.")], False, None),
+    ("R-3 CI status command printed that the suite passed -> silent",
+     [_prompt("did CI finish?"), *_bash("python3 tools/ci.py status", "pipeline 4471: test suite passed on 77aa01e"),
+      _asst_text("The pipeline is done and the test suite passed on 77aa01e.")], False, None),
+    ("R-4 checks ran in the pre-commit hook of a git commit -> silent",
+     [_prompt("commit it"), *_edit("/w/app.py"),
+      *_bash("git add app.py && git commit -q -m 'fix the cache key'", "lint: OK\ntypes: OK\npre-commit: OK\n[main 1a2b3c4] fix the cache key"),
+      _asst_text("Committed as 1a2b3c4, and all checks passed in the pre-commit hook.")], False, None),
+    ("R-4b a command in backticks said to pass, run inside the commit hook -> silent by default",
+     [_prompt("commit it"), *_bash("git commit -q -m 'x'", "pre-commit: ./check.sh --commit\npre-commit: OK"),
+      _asst_text("Committed. `./check.sh --commit` passed.")], False, None),
+    ("R-5 '5x faster' after a benchmark script run by python3.11 -> silent (default)",
+     [_prompt("speed up the tokenizer"), *_bash("python3.11 scripts/bench_parse.py", "old 640 ms\nnew 120 ms"),
+      _asst_text("The new tokenizer is 5x faster on the sample corpus.")], False, None),
+    ("R-5b same with speed claims switched on: python3.11 runs a bench script -> silent",
+     [_prompt("speed up the tokenizer"), *_bash("python3.11 scripts/bench_parse.py", "old 640 ms\nnew 120 ms"),
+      _asst_text("The new tokenizer is 5x faster on the sample corpus.")], False, OPTIONAL),
+    ("R-6 a simulated quantity 'fell from 0.84 to 0.61' -> silent (default)",
+     [_prompt("try more friction"), *_bash("python3 sim/orbit.py", "drift 0.84 ... 0.61"),
+      _asst_text("With more friction, the simulated drift fell from 0.84 to 0.61.")], False, None),
+    ("R-6b same with speed claims switched on: a change without a unit is not a timing -> silent",
+     [_prompt("try more friction"), *_bash("python3 sim/orbit.py", "drift 0.84 ... 0.61"),
+      _asst_text("With more friction, the simulated drift fell from 0.84 to 0.61.")], False, OPTIONAL),
+    ("R-6c a count 'went from 310 to 342' with speed claims switched on -> silent",
+     [_prompt("rerun the linker"), *_bash("python3 link.py", "linked 342"),
+      _asst_text("Across the catalogue, linked records went from 310 to 342.")], False, OPTIONAL),
+    ("R-4c tests passed; a commit aborted by a non-test hook check (its output shows the tests "
+     "passing) and then a recommit -> silent",
+     [_prompt("finish and commit"), *_bash("pytest -q", "........\n212 passed in 9.80s"),
+      *_bash("git add src tests && git commit -q -m 'rule'",
+             "unit tests: 212 passed\ndocs stamp is stale: run tools/stamp.py\npre-commit ABORTED", exit_code=1),
+      *_bash("python3 tools/stamp.py && git add docs && git commit -q -m 'rule'", "pre-commit: OK\n[main 4d4d4d4] rule"),
+      _asst_text("Committed as 4d4d4d4. The tests pass.")], False, None),
+    ("R-4d guard: the aborted commit's own output shows a test failure -> fires",
+     [_prompt("finish and commit"),
+      *_bash("git add src tests && git commit -q -m 'rule'", "unit tests: 2 failed, 210 passed\npre-commit ABORTED", exit_code=1),
+      _asst_text("The tests pass.")], True, None),
+    # 2. The text is not a claim of a check.
+    ("R-7 'all pass/fail thresholds' is not a test claim -> silent",
+     [_prompt("explain the study"),
+      _asst_text("Each grader scored the essays blind, with all pass/fail cut-offs set before marking.")], False, None),
+    ("R-8 a planned step named in backticks followed by 'pass' -> silent",
+     [_prompt("what next?"), *_bash("git status --short", ""),
+      _asst_text("Then comes stage B and a `DRY RUN` pass over the inventory.")], False, None),
+    ("R-8b same with quoted-command claims switched on: a step name is not a command -> silent",
+     [_prompt("what next?"), *_bash("git status --short", ""),
+      _asst_text("Then comes stage B and a `DRY RUN` pass over the inventory.")], False, OPTIONAL),
+    ("R-9 '`trace_id` pass-through' -> silent",
+     [_prompt("plan the proxy change"), *_bash("grep -n header proxy.py", "40: headers"),
+      _asst_text("The proxy keeps its `trace_id` pass-through unchanged.")], False, OPTIONAL),
+    ("R-9b an identifier in backticks said to pass, in reasoning about a design -> silent (default)",
+     [_prompt("would a symlink work?"), *_bash("ls -la /srv", "data"),
+      _asst_text("Under that layout `is_allowed_path` passes, because the target stays inside the data root.")], False, None),
+    ("R-10 an estimate '~20x faster' from general knowledge -> silent (default)",
+     [_prompt("why is the lookup slow?"), *_read("/w/src/index.go", total=600, offset=120, limit=40),
+      _asst_text("Add an index on the user column. An indexed lookup is ~20x faster here.")], False, None),
+    ("R-10b same with speed claims switched on: an estimate marked '~' -> silent",
+     [_prompt("why is the lookup slow?"), *_read("/w/src/index.go", total=600, offset=120, limit=40),
+      _asst_text("Add an index on the user column. An indexed lookup is ~20x faster here.")], False, OPTIONAL),
+    ("R-11 'after the tests pass' in a plan for later -> silent",
+     [_prompt("plan the migration"), *_read("/w/billing/models.py", total=300),
+      _asst_text("We move billing onto the new schema later, after its migration tests pass in staging.")], False, None),
+    ("R-11b 'when the build succeeds' in a plan -> silent",
+     [_prompt("plan it"), _asst_text("The nightly job uploads the installer when the build succeeds.")], False, None),
+    # 3. The message attributes the claim to earlier work, a source, the user or someone else.
+    ("R-12 first-person account of an earlier check, no tool calls -> silent",
+     [_prompt("how did the regression slip through?"),
+      _asst_text("I checked the three importers for the encoding bug and stopped there. "
+                 "I never looked at the exporter.")], False, None),
+    ("R-13 'I tested the parser' as self-critique, no run in the turn -> silent",
+     [_prompt("what went wrong in the report?"), *_edit("/w/notes/lessons.md"),
+      _asst_text("I tested the parser on every fixture, but the summary table was written by hand.")], False, None),
+    ("R-14 'I've verified' resting on output the user pasted -> silent",
+     [_prompt("output: replication lag 0s, all replicas in sync"),
+      _asst_text("From the output you pasted, I've verified replica 2 caught up.")], False, None),
+    ("R-15 another agent's reads described ('It read schema.sql in full') -> silent",
+     [_prompt("review the worker's log"), *_bash("jq -r .text worker-log.json", "..."),
+      _asst_text("The worker did better this time. It read the spec in full and then read `schema.sql` in full before writing.")],
+     False, None),
+    ("R-15b guard: 'To review it properly, I read parser.rs in full' with a partial read -> fires",
+     [_prompt("review"), *_read("/w/src/parser.rs", total=850, limit=200),
+      _asst_text("To review it properly, I read parser.rs in full.")], True, None),
+    ("R-16 a speed figure quoted from a paper (et al.) with speed claims switched on -> silent",
+     [_prompt("does caching help?"), *_bash("grep -n faster notes/lit.txt", "12: faster"),
+      _asst_text("Lee et al. found readers 12% faster with the larger font.")], False, OPTIONAL),
+    ("R-17 a commit hash in backticks said to have passed (CI report) -> silent (default)",
+     [_prompt("is the nightly fine?"), *_bash("gh run list -L 1", "completed success nightly 5e5e5e1"),
+      _asst_text("The nightly for `5e5e5e1` passed later on.")], False, None),
+    # Shaped like the firings judged correct: end-of-work summaries restating earlier results
+    # as current fact in a turn that ran nothing relevant. These must still fire.
+    ("C-1 status recap after editing a note: 'verified live', 'tests green' -> fires",
+     [_prompt("great, is it finished?"), *_edit("/w/docs/status.md"), *_edit("/w/docs/status.md"),
+      _asst_text("Finished. Rollout verified live.\n\n- The two permission bugs are fixed.\n- Four commits shipped; tests green (530 passed).")],
+     True, None),
+    ("C-2 'All 215 tests passing' with no tool calls -> fires",
+     [_prompt("how did the release go?"), _asst_text("Release is out. All 215 tests passing and the schema change applied.")],
+     True, None),
+    ("C-3 'works end-to-end' after only reading and editing a document -> fires",
+     [_prompt("note the mailer change"), *_read("/w/docs/mailer.md", total=150, limit=30), *_edit("/w/docs/mailer.md"),
+      _asst_text("Noted in the doc.\n\n- The queue now works end-to-end, from signup to the welcome email.")], True, None),
+    ("C-4 status table '**388 passed**' with no tool calls -> fires",
+     [_prompt("summary please"),
+      _asst_text("## Progress\n\n| Part | State |\n|---|---|\n| Refactor | done; suite **388 passed** |")],
+     True, None),
+    ("C-5 guard: a Read of an unrelated source file does not support a test claim -> fires",
+     [_prompt("done?"), *_read("/w/src/app.py", total=40), _asst_text("Done. All tests pass.")], True, None),
+    # The two kinds now off by default.
+    ("O-1 '3x faster' with no timing command (P-1's input) -> silent by default",
+     [_prompt("speed up the parser"), *_edit("/w/src/parser.rs"), *_bash("cargo build --release", "Finished"),
+      _asst_text("The parser is now 3x faster on large inputs.")], False, None),
+    ("O-2 a named command said to pass that did not run -> silent by default",
+     [_prompt("fix it"), *_bash("cargo build", "Finished"), _asst_text("`make check` passes.")], False, None),
+    ("O-3 'perf' alone switches on speed claims only -> fires on '3x faster'",
+     [_prompt("speed up the parser"), *_edit("/w/src/parser.rs"),
+      _asst_text("The parser is now 3x faster on large inputs.")], True, "perf"),
+]
+
 # (name, events, text the pause reason must contain, text it must not contain)
 REASON_CASES = [
     ("G-10 scope gap computed over the session says 'in this session'",
@@ -619,9 +779,19 @@ def main() -> int:
         failures += 1
 
     for name, events, active, extra, want in ACCEPTANCE + EXTRA + [(n, e, False, None, w) for n, e, w in FIXES]:
-        got = _run(events, stop_hook_active=active, extra=extra)
+        optional = OPTIONAL if name.startswith(_OPTIONAL_CASES) else None
+        got = _run(events, stop_hook_active=active, extra=extra, optional=optional)
         ok = got == want
-        print(f"[{'PASS' if ok else 'FAIL'}] {name}  (want block={want}, got block={got})")
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}{'  [' + optional + ' on]' if optional else ''}  "
+              f"(want block={want}, got block={got})")
+        if not ok:
+            failures += 1
+
+    for name, events, want, optional in PRECISION:
+        got = _run(events, optional=optional)
+        ok = got == want
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}{'  [' + optional + ' on]' if optional else ''}  "
+              f"(want block={want}, got block={got})")
         if not ok:
             failures += 1
 

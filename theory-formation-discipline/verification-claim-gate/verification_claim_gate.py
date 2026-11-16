@@ -10,17 +10,21 @@ points at them; this hook does the pointing before the turn ends.
 
 What counts as support depends on the claim:
 
-- a test claim needs a test command in the turn, and the last such command must
-  not have failed (non-zero exit, or a failure summary in its output);
-- a build claim needs a build, check or test command, under the same rule;
+- a test claim needs a test command in the turn, or a call whose output shows a
+  test result (a log or background output read back, a CI status command), and
+  the last such call must not have failed (non-zero exit, or a failure summary in
+  its output);
+- a build claim needs a build, check or test command, or output showing a test or
+  check result (such as a pre-commit hook's), under the same rule;
 - a claim that a named command passes ("`make check` passes") needs that
-  command in the turn, and its last run must not have failed;
+  command in the turn, and its last run must not have failed (off by default);
 - a "works" / "end-to-end" claim needs a command that ran something (not only
   ls, cat, grep and the like) and did not fail, or an HTTP fetch;
-- a "no errors" / "healthy" / "I've confirmed" claim needs any observing tool
-  call (a command, a Read, a search, a fetch);
+- a "no errors" / "healthy" claim needs any observing tool call (a command, a
+  Read, a search, a fetch);
 - a speed or memory claim ("3x faster", "now runs in 1.2 s") needs a timing or
-  benchmark program, in command position, that did not fail;
+  benchmark program, in command position, that did not fail (off by default;
+  CLAIM_GATE_OPTIONAL=perf,cited switches the two optional kinds on);
 - a whole-file claim ("read the whole file", "read X in full") is compared with
   the reads of the whole session (Read calls, and cat / head / tail / sed -n at the
   end of a pipeline): the file must have been read with no line limit, or with reads
@@ -29,9 +33,12 @@ What counts as support depends on the claim:
   read under that directory was read only in part; "read all four <noun>s" fails if
   fewer files named like the noun were read in full than the claim counts.
 
-A claim inside a code block or a quotation, a negated or conditional claim, a
-claim followed by "means" or the like (a rule, not a report), a question, and a
-sentence that hedges the claim or attributes it to someone else are not counted.
+A claim inside a code block or a quotation, a negated, conditional or later-time
+claim ("after the tests pass"), "pass" in "pass/fail" or "pass-through", a claim
+followed by "means" or the like (a rule, not a report), a question, a first-person
+account of a check ("I checked", "I tested"), a read claim whose reader is someone
+else, and a sentence that hedges the claim or attributes it to someone else or to a
+source are not counted.
 
 It is advisory. It pauses at most once per stop cycle (`stop_hook_active`), and
 on any unexpected input it does nothing (fails open). An optional trial file can
@@ -81,13 +88,14 @@ _BUILD_CLAIM = re.compile(
     re.IGNORECASE,
 )
 
-# "Works" claims: something was run and seen to work.
+# "Works" claims: something was run and seen to work. A bare first-person "I tested" is not
+# matched: at the end of a turn it is nearly always an account of earlier work.
 _RUN_CLAIM = re.compile(
     r"\b(?:verified|tested|confirmed|works?) end[- ]to[- ]end\b"
     r"|\bverified (?:that |it |this )?works?\b"
     r"|\bconfirmed (?:that |it |this )?works?\b"
     r"|\bverified (?:live|in prod|in production)\b"
-    r"|\bi(?:'ve| have)? tested\b|\b(?:was|were|been) tested (?:on|against|with|live|end)\b"
+    r"|\b(?:was|were|been) tested (?:on|against|with|live|end)\b"
     r"|\bsmoke tests? (?:pass(?:es|ed)?|(?:is|was) clean)\b",
     re.IGNORECASE,
 )
@@ -99,10 +107,11 @@ _SYSTEM_NOUN = (
     r"container|database|db|instance|job|daemon|health[- ]?check|replica|worker|"
     r"queue|ci|build|training run|training|api|site|backend|frontend)s?"
 )
+# A first-person "I checked" / "I've verified" is not matched, for the same reason as "I
+# tested": it narrates an earlier action (often one the message goes on to qualify).
 _OBSERVE_CLAIM = re.compile(
     r"\bno errors\b|\b(?:zero|0) errors\b|\bno error(?: signal| movement| at all)\b"
     r"|\bno error(?=\s*[.,;!)]|\s*$)"
-    r"|\bi(?:'ve| have)? (?:checked|verified|confirmed)\b"
     r"|\bnone (?:of them |of the \w+ )?failed\b"
     r"|\b" + _SYSTEM_NOUN + r"\b[^.;:!?]{0,40}?\bhealthy\b"
     r"|\bhealthy\b[^.;:!?]{0,10}?\b" + _SYSTEM_NOUN + r"\b",
@@ -123,18 +132,38 @@ _SCOPE_CLAIM = re.compile(
 
 # A measured speed or size change. Support is a timing or benchmark command. A
 # plain "runs in 40 minutes" is usually background, not a measurement, so a time
-# counts only with "now" or as a change ("from 900 ms to 300 ms").
-_UNIT = r"(?:ms|µs|us|ns|s|secs?|seconds?|mins?|minutes?|h|hours?|[KMG]i?B|%)"
+# counts only with "now" or as a change ("from 900 ms to 300 ms"); a change needs a
+# unit, since "went from 310 to 342" is a count. OFF BY DEFAULT (see OPTIONAL_ENV):
+# in an evaluation on recorded sessions nearly every speed claim it flagged was a
+# simulation result, an estimate, a figure quoted from a source, or a benchmark whose
+# output was read back in the turn.
+_UNIT = (r"(?:ms|µs|us|ns|s|secs?|seconds?|milliseconds?|microseconds?|nanoseconds?|mins?|minutes?|h|hours?|"
+         r"[KMG]i?B|%)")
+_NUM = r"(?:about |roughly |~)?\d+(?:\.\d+)?"
 _PERF_CLAIM = re.compile(
     r"\b\d+(?:\.\d+)? ?(?:x|×|%|percent|times) (?:faster|slower|quicker|speed-?up|less memory|smaller)\b"
     r"|\b(?:speed-?up|sped up|speeds up) (?:of|by) (?:about |roughly |~)?\d"
     r"|\b(?:reduc|cut|lower|dropp|improv)\w* (?:the )?(?:latency|runtime|run time|wall time|memory(?: use| usage)?|"
     r"build time|startup time|throughput) (?:by|from) (?:about |roughly |~)?\d"
-    r"|\bnow (?:runs?|takes?|completes?|finishes) (?:in )?(?:about |roughly |~)?\d+(?:\.\d+)? ?" + _UNIT + r"(?!\w)"
-    r"|\b(?:dropped|fell|went|came|is|are|was) (?:down )?from (?:about |roughly |~)?\d+(?:\.\d+)? ?" + _UNIT
-    + r"? to (?:about |roughly |~)?\d",
+    r"|\bnow (?:runs?|takes?|completes?|finishes) (?:in )?" + _NUM + r" ?" + _UNIT + r"(?!\w)"
+    r"|\b(?:dropped|fell|went|came|is|are|was) (?:down )?from " + _NUM + r" ?(?:" + _UNIT + r" to " + _NUM
+    + r"|to " + _NUM + r" ?" + _UNIT + r"(?!\w))",
     re.IGNORECASE,
 )
+# Words just before a speed claim that make it an estimate, not a measurement.
+_ESTIMATE_BEFORE = re.compile(
+    r"(?:~|\b(?:about|roughly|approximately|around|up to|nearly|maybe|perhaps|likely|typically|usually|generally))\s*$",
+    re.IGNORECASE,
+)
+
+# Claim kinds that are off unless named in this environment variable (comma- or
+# space-separated): "perf" (speed and memory claims) and "cited" (a command quoted in
+# backticks said to pass, judged against whether that command ran).
+OPTIONAL_ENV = "CLAIM_GATE_OPTIONAL"
+
+
+def _optional_kinds() -> set[str]:
+    return {w for w in re.split(r"[\s,]+", os.environ.get(OPTIONAL_ENV, "").lower()) if w}
 
 # A claim to have read a whole repository or codebase. Reads cannot be shown
 # to cover one, so this is always asked to be restated as what was read. The noun
@@ -182,6 +211,9 @@ _CITED_CLAIM = re.compile(
     r"exit(?:s|ed)? (?:0|zero|cleanly)|returns? 0)\b",
     re.IGNORECASE,
 )
+# A quoted span judged as a command: a path or script, or a lower-case program name followed
+# by arguments. Identifiers (`check_root`), commit hashes and step names (`REVIEW FIRST`) are not.
+_COMMAND_LIKE = re.compile(r"^(?:\.{0,2}/\S+|\S+\.(?:sh|py|js|mjs|ts|rb|pl|bash)\b|[a-z][\w.+-]*(?:\s+\S+)+)")
 
 # Claim kinds whose support is a property of the whole turn: checked once.
 _TURN_CLAIMS = (
@@ -203,8 +235,9 @@ _HEDGE = re.compile(
     r"should (?:verify|test|check|run)|"
     r"needs? (?:verification|testing|to be (?:run|tested|verified))|"
     r"without (?:running|checking|verifying|testing)|"
-    r"according to|"
+    r"according to|et al|"
     r"(?:subagent|agent|reviewer|user|you|he|she|they) (?:reported|reports|says|said|claims?)|"
+    r"(?:you|the user) (?:pasted|shared|posted|sent|showed)|"
     r"earlier in (?:this|the) session|in (?:an? |the )?(?:earlier|previous|last) (?:turn|run|session|message)|"
     r"previously|last time)\b",
     re.IGNORECASE,
@@ -215,9 +248,28 @@ _NEGATED_BEFORE = re.compile(
     r"(?:\b(?:not|never|no longer|cannot|if|unless|until|once|whether|before|"
     r"might|may|should|would|could|will|to see|expect(?:ed)? to|make sure|ensure|"
     r"check (?:that|whether|if)|confirm (?:that|whether|if)|so that|in case)|n't)"
-    r"\W+(?:\w+\W+){0,3}$",
+    r"\W+(?:\w+\W+){0,3}$"
+    # "after the new package's tests pass", "when the build succeeds": a clause about a later
+    # time. Only words and spaces between, so "After the fix, all tests pass" is still a claim.
+    r"|\b(?:after|when|as soon as|till)\s+(?:[\w'’-]+\s+){0,3}$",
     re.IGNORECASE,
 )
+
+# A read claim whose reader is someone else: "It read main.py in full" in an account of
+# another agent's session. Judged on the text before the claim and the claim itself; a
+# later "I" or "we" makes the agent the reader again.
+_OTHER_READER = re.compile(
+    r"\b(?:it|he|she|they|you|(?:the |that |this |another |other )?(?:sub)?agent|the model|the reviewer|the worker)"
+    r"\s+(?:also |then |first |had |has |have |only )?(?:read|reviewed|went|looked|opened|skimmed)\b",
+    re.IGNORECASE,
+)
+
+
+def _other_reader(sentence: str, m: re.Match) -> bool:
+    found = list(_OTHER_READER.finditer(sentence[: m.end()]))
+    if not found:
+        return False
+    return not re.search(r"\b(?:I|we|We)\b", sentence[found[-1].end() : m.end()])
 
 # --------------------------------------------------------------------------
 # Evidence. Commands are split into segments on shell separators; a segment
@@ -256,6 +308,19 @@ _FAIL_OUTPUT = re.compile(
     r":\d+:\d+: (?:fatal )?error:|\berror TS\d+:|"
     r"\b[1-9]\d* (?:failed|failing|failures?)\b|Tests?:\s+[1-9]\d* failed",
     re.MULTILINE,
+)
+# A test run's result seen in the output of any call in the turn: a log or a background
+# task's output read back (tail, cat, Read, a task-output tool), or a CI status command.
+_TEST_PASS_OUTPUT = re.compile(
+    r"\b\d+ passed\b|\btest result: ok\b|\bRan \d+ tests? in\b|\bTests?:\s+\d+ passed\b"
+    r"|\ball (?:\d+ )?(?:tests?|cases?|checks?) (?:passed|green)\b|\ball cases green\b"
+    r"|\b(?:suite|tests?|test run)\b[^\n]{0,20}?\b(?:PASSED|passed|green)\b",
+    re.IGNORECASE,
+)
+# Checks that ran inside another command, such as a pre-commit hook inside `git commit`.
+_CHECK_PASS_OUTPUT = re.compile(
+    r"\bpre-commit(?: hook)?:? (?:OK|passed)\b|\b(?:hooks?|checks?|lint|build) (?:passed|OK|succeeded)\b",
+    re.IGNORECASE,
 )
 _HTTP_TOOLS = re.compile(r"^(?:WebFetch|mcp__.*(?:playwright|puppeteer|browser|fetch|http).*)$", re.IGNORECASE)
 _NON_OBSERVING_TOOLS = frozenset(
@@ -397,12 +462,26 @@ def _turn_calls(events: list[dict]) -> list[Call]:
     return calls
 
 
-def _last_run(calls: list[Call], *patterns: re.Pattern) -> Call | None:
+def _last_run(calls: list[Call], patterns: tuple[re.Pattern, ...], outputs: tuple[re.Pattern, ...] = ()) -> Call | None:
+    """The last call that ran a command matching `patterns`, or whose output (any observing
+    tool) shows a result matching `outputs`."""
     last = None
     for c in calls:
         if c.name == "Bash" and any(p.search(s) for s in _run_segments(c.command) for p in patterns):
             last = c
+        elif outputs and c.name not in _NON_OBSERVING_TOOLS and c.result_text and any(
+                o.search(c.result_text) for o in outputs):
+            last = c
     return last
+
+
+def _evidence_failed(c: Call, patterns: tuple[re.Pattern, ...]) -> bool:
+    """Whether the evidence call shows a failure. A call that counts only for its output (a log
+    read back, a commit whose hook printed test results) failed only if that output shows a
+    failure: its exit code may come from something else, such as a hook's unrelated check."""
+    if c.name == "Bash" and any(p.search(s) for s in _run_segments(c.command) for p in patterns):
+        return c.failed()
+    return bool(c.result_text and _FAIL_OUTPUT.search(c.result_text))
 
 
 def _ran_note(calls: list[Call]) -> str:
@@ -445,7 +524,7 @@ def _is_timing(command: str) -> bool:
         prog = os.path.basename(words[i])
         if prog in _TIMERS or "bench" in prog.lower() or _TIMED_RUN.match(" ".join([prog] + words[i + 1:])):
             return True
-        if prog in _INTERPRETERS:
+        if prog in _INTERPRETERS or re.fullmatch(r"python\d+(?:\.\d+)?", prog):
             args = [w for w in words[i + 1:] if not w.startswith("-") and w not in ("run", "exec")]
             if args and "bench" in os.path.basename(args[0]).lower():
                 return True
@@ -459,16 +538,17 @@ def _support(kind: str, calls: list[Call], spans: list[str]) -> str | None:
         if any(_run_segments(s) and _cited_ok(s, calls) for s in spans if len(s.strip()) >= 4):
             return None
     if kind == "test":
-        last = _last_run(calls, _TEST_CMD)
+        last = _last_run(calls, (_TEST_CMD,), (_TEST_PASS_OUTPUT,))
         if last is None:
-            return "no test command ran in this turn" + _ran_note(calls)
-        if last.failed():
+            return "no test command ran in this turn, and no output read in it shows a test result" + _ran_note(calls)
+        if _evidence_failed(last, (_TEST_CMD,)):
             return f"the last test command in this turn, {last.describe()}, failed"
         return None
     if kind == "build":
-        last = _last_run(calls, _BUILD_CMD, _TEST_CMD)
+        last = _last_run(calls, (_BUILD_CMD, _TEST_CMD), (_TEST_PASS_OUTPUT, _CHECK_PASS_OUTPUT))
         if last is None:
-            return "no build, check or test command ran in this turn" + _ran_note(calls)
+            return ("no build, check or test command ran in this turn, and no output read in it shows a check result"
+                    + _ran_note(calls))
         if last.failed():
             return f"the last build or test command in this turn, {last.describe()}, failed"
         return None
@@ -1017,7 +1097,8 @@ def _prepare(text: str) -> tuple[str, list[str]]:
 
 
 def _sentences(prose: str) -> list[str]:
-    return [s for s in re.split(r"(?<=[.!?;])\s+|\n+", prose) if s.strip()]
+    # "et al.", "e.g." and "i.e." do not end a sentence: a citation stays with its claim.
+    return [s for s in re.split(r"(?<=[.!?;])(?<!\bal\.)(?<!\be\.g\.)(?<!\bi\.e\.)\s+|\n+", prose) if s.strip()]
 
 
 def find_problems(text: str, calls: list[Call], session: list[Call] | None = None) -> list[tuple[str, str]]:
@@ -1025,15 +1106,23 @@ def find_problems(text: str, calls: list[Call], session: list[Call] | None = Non
     prose, spans = _prepare(text)
     problems: list[tuple[str, str]] = []
     checked: set[str] = set()
+    optional = _optional_kinds()
     cov, touched = _coverage(session if session is not None else calls, calls)
+
+    def skip(sentence: str, m: re.Match) -> bool:
+        # negated, conditional or prospective; or "pass" in "pass/fail", "pass-through"
+        return bool(_NEGATED_BEFORE.search(sentence[: m.start()])) or sentence[m.end(): m.end() + 1] in ("-", "/")
+
     for sentence in _sentences(prose):
         if sentence.rstrip().endswith("?") or _HEDGE.search(sentence):
             continue
         for kind, pattern in _TURN_CLAIMS:
-            if kind in checked:
+            if kind in checked or (kind == "perf" and "perf" not in optional):
                 continue
             for m in pattern.finditer(sentence):
-                if _NEGATED_BEFORE.search(sentence[: m.start()]) or _GENERIC_AFTER.match(sentence[m.end():]):
+                if skip(sentence, m) or _GENERIC_AFTER.match(sentence[m.end():]):
+                    continue
+                if kind == "perf" and _ESTIMATE_BEFORE.search(sentence[: m.start()]):
                     continue
                 checked.add(kind)
                 gap = _support(kind, calls, spans)
@@ -1041,7 +1130,7 @@ def find_problems(text: str, calls: list[Call], session: list[Call] | None = Non
                     problems.append((m.group(0).strip(), gap))
                 break
         for m in _SCOPE_CLAIM.finditer(sentence):
-            if _NEGATED_BEFORE.search(sentence[: m.start()]):
+            if skip(sentence, m) or _other_reader(sentence, m):
                 continue
             gap = _scope_problem(sentence, m, cov, touched)
             if gap:
@@ -1050,22 +1139,22 @@ def find_problems(text: str, calls: list[Call], session: list[Call] | None = Non
         for pattern, judge in ((_DIR_CLAIM, lambda m: _dir_problem(m, cov, spans)),
                                (_COUNT_CLAIM, lambda m: _count_problem(m, cov))):
             for m in pattern.finditer(sentence):
-                if _NEGATED_BEFORE.search(sentence[: m.start()]):
+                if skip(sentence, m) or _other_reader(sentence, m):
                     continue
                 gap = judge(m)
                 if gap:
                     problems.append((m.group(0).strip(), gap))
                     break
         for m in _REPO_CLAIM.finditer(sentence):
-            if _NEGATED_BEFORE.search(sentence[: m.start()]):
+            if skip(sentence, m) or _other_reader(sentence, m):
                 continue
             problems.append((m.group(0).strip(), "reads cannot be shown to cover a whole repository; name the files or directories that were read"))
             break
-        for m in _CITED_CLAIM.finditer(sentence):
-            if _NEGATED_BEFORE.search(sentence[: m.start()]):
+        for m in (_CITED_CLAIM.finditer(sentence) if "cited" in optional else ()):
+            if skip(sentence, m):
                 continue
             span = spans[int(m.group(1))]
-            if _run_segments(span) and not _cited_ok(span, calls):
+            if _COMMAND_LIKE.match(span.strip()) and _run_segments(span) and not _cited_ok(span, calls):
                 ran = any(c.name == "Bash" and span.strip() in c.command for c in calls)
                 gap = "its last run in this turn failed" if ran else "it did not run in this turn"
                 problems.append((f"`{span}`" + m.group(0)[len(m.group(0).split()[0]):], gap))
