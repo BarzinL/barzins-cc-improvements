@@ -10,7 +10,7 @@ names the model that was the main one in use when the entry was written.
   engine refuses `$.session.compact()`, so the wind-down saved state and then never compacted. The mod now falls back
   to `$.command.run({ command: "compact", args })`, which queues `/compact` as if typed. Validated and type-checked
   (a wrong argument name fails the check). Seen live in a VS Code session: `/compact` was queued with the
-  mod's instructions and reported "Compaction canceled", cause not yet established.
+  mod's instructions and the operator cancelled that run by hand, so the fallback reached a real `/compact`.
 
 ## 2026-11-15 (Opus 5.5)
 

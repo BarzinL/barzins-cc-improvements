@@ -38,7 +38,7 @@ available in a headless (-p / SDK) session yet: compaction here runs inside a tu
 `/compact` command through `$.command.run`, which runs it as if typed once the session is idle; this differs from a
 cron prompt that says `/compact`, which arrives as text. Added 2026-11-18 after the refusal in a VS Code session;
 validated and type-checked. Seen live in a VS Code session the same day: the mod queued `/compact` with its
-instructions; that run reported "Compaction canceled", cause not yet established.
+instructions; the operator cancelled that run by hand, so the fallback reached a real `/compact`.
 
 ## Install
 
