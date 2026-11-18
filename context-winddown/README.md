@@ -33,6 +33,13 @@ skills cannot invoke built-in commands. A mod's `$.session.compact()` makes the 
 `/compact` makes. Mods need a Claude Code build with the mod API; the full cycle was tested on
 2.1.322 in a terminal session, and the mod also loads in the VS Code extension.
 
+In a headless or SDK session (`claude -p`, the VS Code extension) the engine refuses `$.session.compact()` ("not
+available in a headless (-p / SDK) session yet: compaction here runs inside a turn"). The mod then queues the
+`/compact` command through `$.command.run`, which runs it as if typed once the session is idle; this differs from a
+cron prompt that says `/compact`, which arrives as text. Added 2026-11-18 after the refusal in a VS Code session;
+validated and type-checked. Seen live in a VS Code session the same day: the mod queued `/compact` with its
+instructions; that run reported "Compaction canceled", cause not yet established.
+
 ## Install
 
 ```bash

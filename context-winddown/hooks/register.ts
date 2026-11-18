@@ -5,7 +5,8 @@
 // prompt asking the agent to finish its current step, save state and call the
 // ready_to_compact tool. The tool only sets a flag, because a compaction
 // cannot run while a turn is running; when that turn completes the mod
-// compacts the conversation. Automatic compaction stays as the backstop.
+// compacts the conversation, through /compact where the host refuses the direct call. Automatic compaction stays as
+// the backstop.
 import type { Register } from 'claude-code'
 
 const TOOL = 'ready_to_compact'
@@ -52,14 +53,23 @@ export const register: Register = on => {
 
     if (isReady && !e.isAborted) {
       isReady = false
-      // The turn is still closing inside this hook; compact once it has ended.
+      // The turn is still closing inside this hook; compact once it has ended. A headless or SDK host (`claude
+      // -p`, the VS Code extension) refuses `$.session.compact`: there compaction runs inside a turn, as the
+      // `/compact` command, so the mod queues that command instead, which runs once the session is idle.
       $.clock.after(500, () => {
         void $.session.compact({ instructions: COMPACT_INSTRUCTIONS }).then(
           r => {
             if (r.skip === undefined) isPromptSent = false
             $.ui.log(`context-winddown: compaction ${r.skip === undefined ? `done (${r.tokensBefore ?? '?'} -> ${r.tokensAfter ?? '?'} tokens)` : `skipped: ${r.skip}`}`)
           },
-          err => $.ui.log(`context-winddown: compaction failed: ${String(err)}`),
+          err =>
+            void $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS }).then(
+              () => {
+                isPromptSent = false
+                $.ui.log(`context-winddown: compaction queued as /compact (direct call refused: ${String(err)})`)
+              },
+              err2 => $.ui.log(`context-winddown: compaction failed: ${String(err)}; /compact also refused: ${String(err2)}`),
+            ),
         )
       })
       return result

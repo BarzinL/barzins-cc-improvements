@@ -4,6 +4,14 @@ Newest first. The most recent additions are also summarized under "What's new" i
 [README](README.md); entries move out of that section, not out of this file. Each heading
 names the model that was the main one in use when the entry was written.
 
+## 2026-11-18 (Opus 5.5)
+
+- [`context-winddown/`](context-winddown/): in a headless or SDK session (`claude -p`, the VS Code extension) the
+  engine refuses `$.session.compact()`, so the wind-down saved state and then never compacted. The mod now falls back
+  to `$.command.run({ command: "compact", args })`, which queues `/compact` as if typed. Validated and type-checked
+  (a wrong argument name fails the check). Seen live in a VS Code session: `/compact` was queued with the
+  mod's instructions and reported "Compaction canceled", cause not yet established.
+
 ## 2026-11-15 (Opus 5.5)
 
 - Added [`grounding-kits/`](grounding-kits/): `performance/` (`measure.py` times a command repeatedly into a record and compares two records with a seeded bootstrap interval, refusing different commands or inputs and failing commands; plus a playbook) and `scientific/` (`validate.py` keeps a record of checks with computed pass or fail, required tolerance and units, and observed order of convergence; plus a playbook). `task-grounding`'s performance and scientific directives name the kit's tool and playbook when the kit is found beside the hook, and fall back to the previous wording otherwise. Not yet evaluated for effect on outcomes.
